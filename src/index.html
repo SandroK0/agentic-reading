@@ -9,6 +9,7 @@
 <body>
   <header class="toolbar">
     <button id="open-btn" title="Open a PDF (⌘O)">Open</button>
+    <button id="toc-btn" title="Show or hide the table of contents" aria-pressed="true" hidden>Contents</button>
     <span class="title" id="title">Visual Reader</span>
     <div class="nav" id="nav" hidden>
       <button id="prev" aria-label="Previous page">‹</button>
@@ -30,6 +31,11 @@
   </header>
 
   <main class="layout">
+    <nav class="toc" id="toc" aria-label="Contents" hidden>
+      <div class="toc-head">Contents</div>
+      <div class="toc-body" id="toc-body"></div>
+    </nav>
+
     <section class="viewer" id="viewer">
       <div class="empty" id="empty">
         <h1>Open a book to start reading</h1>

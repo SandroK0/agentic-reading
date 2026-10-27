@@ -3,6 +3,7 @@ import { TextLayer } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 import type { ExplainEvent, ExplainRequest, Explanation, ModelChoice, ReaderApi } from "../shared/types";
 import { renderProse } from "./prose";
+import { Contents } from "./toc";
 import "./style.css";
 
 declare global {
@@ -37,6 +38,9 @@ const cardsEmpty = $("cards-empty");
 const countEl = $("count");
 const emptyEl = $("empty");
 const recentsEl = $("recents");
+const tocEl = $("toc");
+const tocBtn = $<HTMLButtonElement>("toc-btn");
+const contents = new Contents($("toc-body"), (page) => void renderPage(page));
 
 interface Book {
   path: string;
@@ -84,6 +88,9 @@ async function openBook(path: string) {
   emptyEl.hidden = true;
   pageEl.hidden = false;
   explainPageBtn.disabled = false;
+  tocBtn.hidden = false;
+  setTocVisible(tocPreference());
+  void contents.load(doc);
 
   const state = await api.bookState(path);
   renderCards(state.explanations);
@@ -113,6 +120,7 @@ async function renderPage(n: number) {
   currentPage = Math.min(Math.max(1, Math.round(n) || 1), doc.numPages);
   const seq = ++renderSeq;
   pageInput.value = String(currentPage);
+  contents.setPage(currentPage);
   prevBtn.disabled = currentPage <= 1;
   nextBtn.disabled = currentPage >= doc.numPages;
   zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
@@ -157,6 +165,30 @@ async function renderPage(n: number) {
   }
   viewer.scrollTop = 0;
 }
+
+// ---------- Contents sidebar ----------
+
+const TOC_KEY = "visual-reader:toc-visible";
+
+function tocPreference(): boolean {
+  try {
+    return localStorage.getItem(TOC_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function setTocVisible(visible: boolean) {
+  tocEl.hidden = !visible;
+  tocBtn.setAttribute("aria-pressed", String(visible));
+  try {
+    localStorage.setItem(TOC_KEY, String(visible));
+  } catch {
+    // preference just won't persist
+  }
+}
+
+tocBtn.onclick = () => setTocVisible(tocEl.hidden);
 
 // ---------- Selection ----------
 

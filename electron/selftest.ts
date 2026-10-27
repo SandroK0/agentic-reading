@@ -5,8 +5,9 @@ import path from "node:path";
 /**
  * End-to-end check, run with:
  *   VR_SELFTEST=<pdf> [VR_SELFTEST_PAGE=n] [VR_SELFTEST_OUT=dir] npx electron .
- * Opens the book, selects the first few lines of the page, clicks
- * "Explain visually", waits for the explainer, saves screenshots and quits.
+ * Opens the book, checks the contents sidebar, selects the first few lines of
+ * the page, clicks "Explain visually", waits for the explainer, saves
+ * screenshots and quits. VR_SELFTEST_NO_EXPLAIN=1 stops before calling Claude.
  */
 export async function runSelfTest(win: BrowserWindow, open: (p: string) => void, quit: (code: number) => void) {
   const pdf = process.env.VR_SELFTEST!;
@@ -36,6 +37,29 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     await waitFor(`document.getElementById("page-input").value === "${page}" && !!document.querySelector("#text-layer span")`, 15_000);
     await new Promise((r) => setTimeout(r, 1000));
     await shot("1-page");
+
+    await waitFor(`!!document.querySelector(".toc-link") || !!document.querySelector(".toc-empty:not(:empty)")`, 15_000);
+    const toc = await js<{ entries: number; top: number; active: string | null; activeVisible: boolean }>(`({
+      entries: document.querySelectorAll(".toc-link").length,
+      top: document.querySelectorAll("#toc-body > ul > li").length,
+      active: document.querySelector(".toc-link.active")?.textContent ?? null,
+      activeVisible: !!document.querySelector(".toc-link.active")?.offsetParent,
+    })`);
+    console.log("[selftest] contents:", JSON.stringify(toc));
+    const jumped = await js<{ clicked: string | null; page: string }>(`(() => {
+      const link = [...document.querySelectorAll(".toc-link")].find((l) => /segmentation/i.test(l.textContent) && !l.disabled);
+      if (!link) return { clicked: null, page: "" };
+      link.click();
+      return { clicked: link.textContent, page: "" };
+    })()`);
+    await new Promise((r) => setTimeout(r, 1500));
+    jumped.page = await js<string>(`document.getElementById("page-input").value`);
+    const activeAfter = await js<string | null>(`document.querySelector(".toc-link.active")?.textContent ?? null`);
+    console.log("[selftest] contents jump:", JSON.stringify({ ...jumped, activeAfter }));
+    await shot("1b-contents-jump");
+    if (process.env.VR_SELFTEST_NO_EXPLAIN) return quit(toc.entries > 0 && jumped.clicked ? 0 : 1);
+    await js(`(() => { const i = document.getElementById("page-input"); i.value = "${page}"; i.dispatchEvent(new Event("change")); })()`);
+    await waitFor(`document.getElementById("page-input").value === "${page}" && !!document.querySelector("#text-layer span")`, 15_000);
 
     const selected = await js<string>(`(() => {
       const spans = [...document.querySelectorAll("#text-layer span")].filter((s) => s.textContent.trim().length > 20);
