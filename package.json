@@ -1,0 +1,22 @@
+{
+  "name": "visual-reader",
+  "productName": "Visual Reader",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A PDF reader that explains any passage visually, using your Claude subscription through the Claude Code CLI",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:renderer": "tsc --noEmit && vite build && node scripts/copy-pdf-assets.mjs",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "44.7.0",
+    "pdfjs-dist": "5.4.530",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.0"
+  }
+}

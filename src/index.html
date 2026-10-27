@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self'; frame-src widget:">
+  <title>Visual Reader</title>
+</head>
+<body>
+  <header class="toolbar">
+    <button id="open-btn" title="Open a PDF (⌘O)">Open</button>
+    <span class="title" id="title">Visual Reader</span>
+    <div class="nav" id="nav" hidden>
+      <button id="prev" aria-label="Previous page">‹</button>
+      <input id="page-input" type="number" min="1" value="1" aria-label="Page number">
+      <span id="page-total" class="muted">/ –</span>
+      <button id="next" aria-label="Next page">›</button>
+      <span class="gap"></span>
+      <button id="zoom-out" aria-label="Zoom out">−</button>
+      <span id="zoom-label" class="muted">100%</span>
+      <button id="zoom-in" aria-label="Zoom in">+</button>
+    </div>
+    <label class="model">
+      <span class="muted">Model</span>
+      <select id="model">
+        <option value="sonnet">Sonnet (faster)</option>
+        <option value="opus">Opus (best)</option>
+      </select>
+    </label>
+  </header>
+
+  <main class="layout">
+    <section class="viewer" id="viewer">
+      <div class="empty" id="empty">
+        <h1>Open a book to start reading</h1>
+        <p class="muted">Drop a PDF here or press ⌘O. Select any passage and click <b>Explain visually</b>.</p>
+        <div class="recents" id="recents"></div>
+      </div>
+      <div class="page" id="page" hidden>
+        <canvas id="canvas"></canvas>
+        <div class="textLayer" id="text-layer"></div>
+      </div>
+      <button class="explain-float" id="explain-float" hidden>Explain visually</button>
+    </section>
+
+    <aside class="panel">
+      <div class="panel-head">
+        <span>Explanations <span class="muted" id="count"></span></span>
+        <button id="explain-page" disabled title="Explain the whole page">Explain this page</button>
+      </div>
+      <div class="cards" id="cards">
+        <p class="muted hint" id="cards-empty">Your explainers for this book will collect here.</p>
+      </div>
+    </aside>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
