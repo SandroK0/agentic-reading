@@ -32,6 +32,7 @@ const nextBtn = $<HTMLButtonElement>("next");
 const zoomLabel = $("zoom-label");
 const modelSelect = $<HTMLSelectElement>("model");
 const selectionMenu = $("selection-menu");
+const questionInput = $<HTMLInputElement>("selection-question");
 const explainPageBtn = $<HTMLButtonElement>("explain-page");
 const cardsEl = $("cards");
 const cardsEmpty = $("cards-empty");
@@ -195,16 +196,34 @@ function showMenu(rect: DOMRect, upward: boolean) {
   selectionMenu.style.top = `${top + viewer.scrollTop}px`;
 }
 
+/** The selection the open menu is for. Kept, because focusing the question box clears the page selection. */
+let pendingSelection: { text: string; page: number } | null = null;
+
+/**
+ * Paints the menu's passage with the CSS Highlight API, so it stays marked
+ * while focus is in the question box and the page selection itself is gone.
+ */
+const PENDING_HIGHLIGHT = "pending-selection";
+
+function markPending(range: Range | null) {
+  if (range) CSS.highlights.set(PENDING_HIGHLIGHT, new Highlight(range));
+  else CSS.highlights.delete(PENDING_HIGHLIGHT);
+}
+
 function hideMenu() {
   selectionMenu.hidden = true;
+  pendingSelection = null;
+  questionInput.value = "";
+  markPending(null);
 }
 
 function explainSelection(mode: ExplainMode) {
-  const sel = selectedPassage();
+  const sel = pendingSelection;
   if (!sel) return;
+  const question = questionInput.value.trim() || undefined;
   hideMenu();
   window.getSelection()?.removeAllRanges();
-  void explainPassage(sel.page, sel.text, mode);
+  void explainPassage(sel.page, sel.text, mode, question);
 }
 
 async function surrounding(page: number, passage: string): Promise<string> {
@@ -251,8 +270,8 @@ function makeCard(data: Card["data"], bookPath: string): Card {
   pageLink.onclick = () => pages.goTo(data.page);
   const quote = document.createElement("span");
   quote.className = "quote";
-  const label = data.question ?? data.passage;
-  quote.textContent = label ? `“${label.length > 160 ? label.slice(0, 160) + "…" : label}”` : "Whole page";
+  const passage = data.passage;
+  quote.textContent = passage ? `“${passage.length > 160 ? passage.slice(0, 160) + "…" : passage}”` : "Whole page";
   const del = document.createElement("button");
   del.className = "card-delete";
   del.textContent = "×";
@@ -287,7 +306,14 @@ function makeCard(data: Card["data"], bookPath: string): Card {
     askFollowup(card, q);
   };
 
-  el.append(head, prose, status, followup);
+  el.append(head);
+  if (data.question) {
+    const asked = document.createElement("p");
+    asked.className = "card-question";
+    asked.textContent = data.question;
+    el.append(asked);
+  }
+  el.append(prose, status, followup);
   const card: Card = { el, prose, status, frame: null, followup, data, bookPath };
   cards.set(data.id, card);
   return card;
@@ -348,14 +374,15 @@ function start(card: Card, req: Omit<ExplainRequest, "id">) {
   void api.explain({ ...req, id: card.data.id });
 }
 
-async function explainPassage(page: number, passage: string, mode: ExplainMode) {
+async function explainPassage(page: number, passage: string, mode: ExplainMode, question?: string) {
   if (!book) return;
   const current = book;
   const context = passage ? await surrounding(page, passage) : (await pages.text(page)).slice(0, PAGE_CONTEXT_CHARS);
   if (book !== current) return;
-  const card = makeCard({ id: newId(), page, passage, mode }, current.path);
+  const card = makeCard({ id: newId(), page, passage, question, mode }, current.path);
   start(card, {
     mode,
+    question,
     bookPath: current.path,
     bookTitle: current.title,
     page,
@@ -434,8 +461,18 @@ modelSelect.onchange = () => {
   void api.saveSettings({ provider, model: rest.join("/") });
 };
 
-// Keep the selection alive when a menu button is pressed.
-selectionMenu.onmousedown = (e) => e.preventDefault();
+// Keep the selection alive when a menu button is pressed; the question box still takes focus.
+selectionMenu.onmousedown = (e) => {
+  if (e.target !== questionInput) e.preventDefault();
+};
+questionInput.onkeydown = (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    explainSelection("text");
+  } else if (e.key === "Escape") {
+    hideMenu();
+  }
+};
 $("explain-text").onclick = () => explainSelection("text");
 $("explain-visual").onclick = () => explainSelection("visual");
 explainPageBtn.onclick = () => void explainPassage(pages.current, "", "visual");
@@ -444,7 +481,13 @@ document.addEventListener("mouseup", (e) => {
   if (selectionMenu.contains(e.target as Node)) return;
   setTimeout(() => {
     const sel = selectedPassage();
-    if (sel) showMenu(sel.rect, sel.upward);
+    if (sel) {
+      // A new selection starts with an empty question.
+      if (sel.text !== pendingSelection?.text) questionInput.value = "";
+      pendingSelection = { text: sel.text, page: sel.page };
+      markPending(window.getSelection()!.getRangeAt(0).cloneRange());
+      showMenu(sel.rect, sel.upward);
+    }
     else hideMenu();
   });
 });

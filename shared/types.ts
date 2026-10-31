@@ -27,7 +27,7 @@ export interface ExplainRequest {
   passage: string;
   /** Text around the passage (or the page text), for grounding. */
   context: string;
-  /** A follow-up question, continuing the conversation of explanation `parentId`. */
+  /** The reader's own question about the passage; with `parentId`, a follow-up in that conversation. */
   question?: string;
   parentId?: string;
   mode: ExplainMode;

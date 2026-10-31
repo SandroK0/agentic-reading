@@ -10,6 +10,7 @@ import path from "node:path";
  * screenshots and quits. VR_SELFTEST_NO_EXPLAIN=1 stops before calling Claude;
  * VR_SELFTEST_MODE=text uses Explain instead of Explain visually, and
  * VR_SELFTEST_FOLLOWUP=1 also asks a follow-up on the new card.
+ * VR_SELFTEST_QUESTION="…" types a question into the selection menu first.
  */
 export async function runSelfTest(win: BrowserWindow, open: (p: string) => void, quit: (code: number) => void) {
   const pdf = process.env.VR_SELFTEST!;
@@ -213,12 +214,34 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     console.log(`[selftest] selected: ${selected.slice(0, 120).replace(/\s+/g, " ")}…`);
     await new Promise((r) => setTimeout(r, 300));
     await shot("2-selection");
+    const floating = await js<boolean>(`!document.getElementById("selection-menu").hidden`);
+    console.log(`[selftest] selection menu shown: ${floating}`);
+
+    // Clicking into the question box and typing must keep the menu open for that selection.
+    const question = process.env.VR_SELFTEST_QUESTION ?? "Why would you change the defaults?";
+    const box = await js<[number, number]>(`(() => { const r = document.getElementById("selection-question").getBoundingClientRect(); return [r.left + 20, r.top + r.height / 2]; })()`);
+    for (const type of ["mouseDown", "mouseUp"] as const) {
+      win.webContents.sendInputEvent({ type, x: Math.round(box[0]), y: Math.round(box[1]), button: "left", clickCount: 1 });
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    await win.webContents.insertText(question);
+    await new Promise((r) => setTimeout(r, 200));
+    const asking = await js<{ open: boolean; focused: boolean; value: string; marked: number }>(`({
+      open: !document.getElementById("selection-menu").hidden,
+      focused: document.activeElement?.id === "selection-question",
+      value: document.getElementById("selection-question").value,
+      // The passage stays marked even though the page selection moved into the box.
+      marked: [...(CSS.highlights.get("pending-selection") ?? [])].map((r) => r.toString().length)[0] ?? 0,
+    })`);
+    const askingOk = asking.open && asking.focused && asking.value === question && asking.marked > 20;
+    console.log(`[selftest] question box: ok=${askingOk} ${JSON.stringify(asking)}`);
+    await shot("2d-question");
 
     if (process.env.VR_SELFTEST_NO_EXPLAIN) {
-      const floating = await js<boolean>(`!document.getElementById("selection-menu").hidden`);
-      console.log(`[selftest] selection menu shown: ${floating}`);
-      return quit(toc.entries > 0 && jumped.clicked && floating && resizeOk && !dragOk.includes(false) ? 0 : 1);
+      return quit(toc.entries > 0 && jumped.clicked && floating && askingOk && resizeOk && !dragOk.includes(false) ? 0 : 1);
     }
+    // Without VR_SELFTEST_QUESTION, explain with the default (empty) question.
+    if (!process.env.VR_SELFTEST_QUESTION) await js(`document.getElementById("selection-question").value = ""`);
 
     const mode = process.env.VR_SELFTEST_MODE === "text" ? "text" : "visual";
     await js(`document.getElementById("explain-${mode}").click()`);
@@ -234,9 +257,10 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     await new Promise((r) => setTimeout(r, 3000));
     await shot("4-explainer");
 
-    const result = await js<{ error: string | null; prose: string; frameHeight: string | null }>(`({
+    const result = await js<{ error: string | null; prose: string; asked: string | null; frameHeight: string | null }>(`({
       error: document.querySelector(".card .status.error")?.textContent ?? null,
       prose: document.querySelector(".card .prose")?.textContent ?? "",
+      asked: document.querySelector(".card .card-question")?.textContent ?? null,
       frameHeight: document.querySelector(".card iframe")?.style.height ?? null,
     })`);
     if (mode === "text") console.log(`[selftest] text explanation: ${result.prose.trim().split(/\s+/).length} words`);

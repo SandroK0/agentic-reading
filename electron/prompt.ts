@@ -20,6 +20,7 @@ Reply with exactly this and nothing else:
 - Use 2 or 3 short bullet lines starting with "- " only when the passage is a list of steps or parts.
 - No preamble, no restating the passage, no "In summary". Plain text; you may use **bold** and \`code\`.
 - Stay grounded in the passage and its surrounding context.
+- If the reader asks a specific question about the passage, answer exactly that question, just as briefly.
 - Answer follow-up questions in the same conversation the same way: directly and briefly.`;
 
 const VISUAL_PROMPT = `You explain passages from books to a reader with a drawing. The reader selected a passage in their PDF reader; you answer with a one-line caption and one static diagram that shows the idea at a glance.
@@ -47,6 +48,7 @@ One or two short sentences (under 40 words) saying what the drawing shows. Plain
 
 # Content
 - Stay grounded in the passage and its surrounding context. Explain what it says; don't drift into the rest of the book.
+- If the reader asks a specific question about the passage, make the caption and drawing answer that question.
 - For follow-up questions in the same conversation, answer with a fresh caption and drawing (same format).`;
 
 export function systemPrompt(mode: ExplainMode): string {
@@ -54,7 +56,7 @@ export function systemPrompt(mode: ExplainMode): string {
 }
 
 export function userPrompt(req: ExplainRequest): string {
-  if (req.question) {
+  if (req.parentId && req.question) {
     return [
       `Follow-up question from the reader (still in "${req.bookTitle}", page ${req.page}):`,
       req.question,
@@ -68,6 +70,7 @@ export function userPrompt(req: ExplainRequest): string {
       : "The reader wants this whole page explained.",
     "",
     `<surrounding-text>\n${req.context}\n</surrounding-text>`,
+    ...(req.question ? ["", `The reader's question about it:\n<question>\n${req.question}\n</question>`] : []),
   ].join("\n");
 }
 
