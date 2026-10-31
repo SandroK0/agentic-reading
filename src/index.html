@@ -29,6 +29,7 @@
       <span class="muted">Model</span>
       <select id="model"></select>
     </label>
+    <button id="panel-btn" title="Show or hide the explanations" aria-pressed="true">Explanations</button>
   </header>
 
   <main class="layout">
@@ -66,8 +67,17 @@
     <div class="resizer" id="panel-resizer" aria-label="Resize explanations" title="Drag to resize, double-click to reset"></div>
     <aside class="panel" id="panel">
       <div class="panel-head">
-        <span>Explanations <span class="muted" id="count"></span></span>
+        <span class="panel-title">Explanations <span class="muted" id="count"></span></span>
         <button id="explain-page" disabled title="Explain the whole page">Explain this page</button>
+        <button class="icon-btn" id="panel-collapse-all" title="Minimise or expand all" aria-label="Minimise or expand all explanations">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3.5 8 6.5l3.5-3M4.5 12.5 8 9.5l3.5 3" /></svg>
+        </button>
+        <button class="icon-btn" id="panel-popout" title="Open in a new window" aria-label="Open in a new window">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path class="when-docked" d="M9.5 2.5h4v4M13.5 2.5 8 8M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" /><path class="when-window" d="M8 8V3.5M8 8H3.5M8 8 2.5 2.5M4 9.5v3a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1h-3" /></svg>
+        </button>
+        <button class="icon-btn" id="panel-close" title="Hide the explanations" aria-label="Hide the explanations">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+        </button>
       </div>
       <div class="cards" id="cards">
         <p class="muted hint" id="cards-empty">Your explainers for this book will collect here.</p>

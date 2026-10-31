@@ -33,6 +33,7 @@ After the first build, `npx electron .` opens it without rebuilding.
 - **Explain a passage:** select text, then click **Explain** (`E`) for a few sentences, or **Explain visually** (`V`) for a drawing. **Explain this page** draws the whole page.
 - **Follow up:** type a question under any explainer. Follow-ups continue the same conversation and keep its style, so Claude remembers the passage.
 - **No contents in the PDF?** Click **Generate with AI** in the Contents sidebar. It reads the book's headings and any printed contents page, and the result is saved with the book. **Regenerate** and **Remove** sit at the top of the list.
+- **Move the explanations:** the button at the top of the panel opens it in its own window (closing that window, or the same button, puts it back). × hides it; the **Explanations** button in the toolbar brings it back.
 - **Pick a theme** in the toolbar: Paper & Ink, Graphite & Violet and Forest Study follow your system's light or dark mode; Night Library is always dark and dims the page. Drawings follow the theme. Themes live in `shared/themes.ts`.
 - **Pick a model** in the toolbar: Sonnet is faster, Opus gives the best results.
 - Explainers are saved per book. Click a card's page badge to jump back to that page.

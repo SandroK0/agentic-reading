@@ -66,6 +66,20 @@ export interface Explanation {
   /** Claude CLI session id from older saves; superseded by `resume`. */
   sessionId?: string;
   createdAt: number;
+  /** Follow-up questions asked on this card, oldest first. The fields above track the latest turn's conversation. */
+  followUps?: FollowUp[];
+  /** Minimised to its header in the panel. */
+  collapsed?: boolean;
+}
+
+/** A follow-up question and its answer, shown inside its explanation's card. */
+export interface FollowUp {
+  /** Also the widget id for its drawing. */
+  id: string;
+  question: string;
+  prose: string;
+  html: string;
+  createdAt: number;
 }
 
 export interface BookState {

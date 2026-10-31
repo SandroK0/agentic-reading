@@ -60,7 +60,10 @@ export class Store {
 
   saveExplanation(bookPath: string, explanation: Explanation) {
     const book = this.book(bookPath);
-    book.explanations = [explanation, ...book.explanations.filter((e) => e.id !== explanation.id)];
+    // New explanations go first; updates (a follow-up, minimising) keep their place.
+    const at = book.explanations.findIndex((e) => e.id === explanation.id);
+    if (at >= 0) book.explanations[at] = explanation;
+    else book.explanations.unshift(explanation);
     this.save();
   }
 

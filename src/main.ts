@@ -1,9 +1,10 @@
 import * as pdfjsLib from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
-import type { ExplainEvent, ExplainMode, ExplainRequest, Explanation, ReaderApi } from "../shared/types";
+import type { ExplainMode, ReaderApi } from "../shared/types";
 import { Pages } from "./pages";
+import { PanelWindow } from "./panel-window";
 import { allThemesCss, themeById, THEMES } from "../shared/themes";
-import { renderProse } from "./prose";
+import { ExplanationCards } from "./cards";
 import { resizableSidebar } from "./resize";
 import { enableTextSelection } from "./selection";
 import { collectContentsSource } from "./contents-source";
@@ -101,6 +102,7 @@ async function openBook(path: string) {
 
   titleEl.textContent = book.title;
   document.title = `${book.title} — Agentic Reading`;
+  panelWindow.setTitle(`Explanations — ${book.title}`);
   pageTotal.textContent = `/ ${doc.numPages}`;
   pageInput.max = String(doc.numPages);
   nav.hidden = false;
@@ -112,7 +114,7 @@ async function openBook(path: string) {
 
   const state = await api.bookState(path);
   void contents.load(doc, state.generatedContents?.entries);
-  renderCards(state.explanations);
+  explanations.show(path, state.explanations);
   await pages.load(doc, state.page);
 }
 
@@ -194,7 +196,8 @@ function applyTheme(id: string | null) {
   } catch {
     // the choice just won't persist
   }
-  for (const card of cards.values()) if (card.frame) card.frame.src = api.widgetUrl(card.data.id, theme.id);
+  explanations.refreshDrawings();
+  panelWindow.setTheme(theme.id);
 }
 
 themeSelect.append(...THEMES.map((t) => new Option(t.label, t.id)));
@@ -309,152 +312,23 @@ async function surrounding(page: number, passage: string): Promise<string> {
 
 // ---------- Explanations ----------
 
-interface Card {
-  el: HTMLElement;
-  prose: HTMLElement;
-  status: HTMLElement;
-  frame: HTMLIFrameElement | null;
-  followup: HTMLFormElement;
-  data: Partial<Explanation> & { id: string; page: number; passage: string };
-  bookPath: string;
-}
-
-const cards = new Map<string, Card>();
-
-function newId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function updateCount() {
-  const n = cardsEl.querySelectorAll(".card").length;
-  countEl.textContent = n ? `(${n})` : "";
-  cardsEmpty.hidden = n > 0;
-}
-
-function makeCard(data: Card["data"], bookPath: string): Card {
-  const el = document.createElement("article");
-  el.className = "card";
-
-  const head = document.createElement("div");
-  head.className = "card-head";
-  const pageLink = document.createElement("button");
-  pageLink.className = "page-link";
-  pageLink.textContent = `p. ${data.page}`;
-  pageLink.title = "Go to this page";
-  pageLink.onclick = () => pages.goTo(data.page);
-  const quote = document.createElement("span");
-  quote.className = "quote";
-  const passage = data.passage;
-  quote.textContent = passage ? `“${passage.length > 160 ? passage.slice(0, 160) + "…" : passage}”` : "Whole page";
-  const del = document.createElement("button");
-  del.className = "card-delete";
-  del.textContent = "×";
-  del.title = "Remove";
-  del.onclick = () => {
-    api.cancel(data.id);
-    el.remove();
-    cards.delete(data.id);
-    if (data.html !== undefined) api.deleteExplanation(bookPath, data.id);
-    updateCount();
-  };
-  head.append(pageLink, quote, del);
-
-  const prose = document.createElement("div");
-  prose.className = "prose";
-  const status = document.createElement("div");
-  status.className = "status";
-
-  const followup = document.createElement("form");
-  followup.className = "followup";
-  followup.hidden = true;
-  const input = document.createElement("input");
-  input.placeholder = "Ask a follow-up…";
-  const ask = document.createElement("button");
-  ask.textContent = "Ask";
-  followup.append(input, ask);
-  followup.onsubmit = (e) => {
-    e.preventDefault();
-    const q = input.value.trim();
-    if (!q) return;
-    input.value = "";
-    askFollowup(card, q);
-  };
-
-  el.append(head);
-  if (data.question) {
-    const asked = document.createElement("p");
-    asked.className = "card-question";
-    asked.textContent = data.question;
-    el.append(asked);
-  }
-  el.append(prose, status, followup);
-  const card: Card = { el, prose, status, frame: null, followup, data, bookPath };
-  cards.set(data.id, card);
-  return card;
-}
-
-function showWidget(card: Card) {
-  if (!card.data.html) return;
-  card.frame?.remove();
-  const frame = document.createElement("iframe");
-  frame.setAttribute("sandbox", "allow-scripts");
-  frame.title = "Visual explainer";
-  frame.src = api.widgetUrl(card.data.id, currentTheme());
-  card.status.before(frame);
-  card.frame = frame;
-}
-
-function finishCard(card: Card) {
-  card.prose.innerHTML = renderProse(card.data.prose ?? "");
-  card.status.replaceChildren();
-  card.status.className = "status";
-  card.status.hidden = true;
-  showWidget(card);
-  card.followup.hidden = false;
-}
-
-function renderCards(explanations: Explanation[]) {
-  for (const c of cards.values()) c.el.remove();
-  cards.clear();
-  for (const e of explanations) {
-    const card = makeCard(e, book!.path);
-    cardsEl.append(card.el);
-    finishCard(card);
-  }
-  updateCount();
-}
-
-function setStatus(card: Card, text: string, opts: { error?: boolean; thinking?: boolean; stop?: boolean } = {}) {
-  card.status.hidden = false;
-  card.status.className = `status${opts.error ? " error" : ""}`;
-  const label = document.createElement("span");
-  label.textContent = text;
-  if (opts.thinking) label.className = "thinking";
-  const parts: HTMLElement[] = [label];
-  if (opts.stop) {
-    const stop = document.createElement("button");
-    stop.textContent = "Stop";
-    stop.onclick = () => api.cancel(card.data.id);
-    parts.push(stop);
-  }
-  card.status.replaceChildren(...parts);
-}
-
-function start(card: Card, req: Omit<ExplainRequest, "id">) {
-  cardsEl.prepend(card.el);
-  cardsEl.scrollTop = 0;
-  updateCount();
-  setStatus(card, "Thinking", { thinking: true, stop: true });
-  void api.explain({ ...req, id: card.data.id });
-}
+const explanations = new ExplanationCards(cardsEl, cardsEmpty, countEl, {
+  api,
+  goTo: (page) => pages.goTo(page),
+  theme: () => currentTheme(),
+  // A new explanation shouldn't land in a hidden panel.
+  onStart: () => {
+    if (panelWindow.place === "hidden") panelWindow.dock();
+  },
+  book: () => (book ? { path: book.path, title: book.title, pageCount: book.doc.numPages } : null),
+});
 
 async function explainPassage(page: number, passage: string, mode: ExplainMode, question?: string) {
   if (!book) return;
   const current = book;
   const context = passage ? await surrounding(page, passage) : (await pages.text(page)).slice(0, PAGE_CONTEXT_CHARS);
   if (book !== current) return;
-  const card = makeCard({ id: newId(), page, passage, question, mode }, current.path);
-  start(card, {
+  explanations.explain(current.path, {
     mode,
     question,
     bookPath: current.path,
@@ -466,54 +340,29 @@ async function explainPassage(page: number, passage: string, mode: ExplainMode, 
   });
 }
 
-function askFollowup(parent: Card, question: string) {
-  if (!book) return;
-  const mode = parent.data.mode ?? "visual";
-  const card = makeCard({ id: newId(), page: parent.data.page, passage: parent.data.passage, question, mode }, book.path);
-  start(card, {
-    mode,
-    bookPath: book.path,
-    bookTitle: book.title,
-    page: parent.data.page,
-    pageCount: book.doc.numPages,
-    passage: parent.data.passage,
-    context: "",
-    question,
-    parentId: parent.data.id,
-  });
-}
+api.onExplainEvent((event) => explanations.onEvent(event));
+const handleFrameMessage = (e: MessageEvent) => explanations.onFrameMessage(e);
+window.addEventListener("message", handleFrameMessage);
 
-api.onExplainEvent((event: ExplainEvent) => {
-  const card = cards.get(event.id);
-  if (!card) return;
-  if (event.type === "text") {
-    const prose = /<explanation>([\s\S]*?)(<\/explanation>|$)/.exec(event.text)?.[1] ?? "";
-    card.prose.innerHTML = renderProse(prose);
-    const drawing = event.text.includes("<widget>");
-    setStatus(card, drawing ? "Drawing" : "Writing", { thinking: true, stop: true });
-  } else if (event.type === "error") {
-    setStatus(card, event.message, { error: true });
-  } else {
-    const { prose, html, provider, model, resume, conversation } = event;
-    Object.assign(card.data, { prose, html, provider, model, resume, conversation, createdAt: Date.now() });
-    finishCard(card);
-    void api.saveExplanation(card.bookPath, card.data as Explanation);
-  }
-});
+// ---------- Explanations panel: docked, own window, or hidden ----------
 
-// Messages from explainer frames: height changes and ask() follow-ups.
-window.addEventListener("message", (e) => {
-  for (const card of cards.values()) {
-    if (!card.frame || e.source !== card.frame.contentWindow) continue;
-    const msg = e.data as { type?: string; height?: number; question?: string };
-    if (msg.type === "vr-height" && typeof msg.height === "number") {
-      card.frame.style.height = `${Math.min(Math.max(msg.height, 40), 2400)}px`;
-    } else if (msg.type === "vr-ask" && msg.question) {
-      askFollowup(card, msg.question.slice(0, 500));
-    }
-    return;
-  }
+const panelEl = $("panel");
+const panelBtn = $<HTMLButtonElement>("panel-btn");
+const popoutBtn = $<HTMLButtonElement>("panel-popout");
+const panelWindow = new PanelWindow(panelEl, {
+  onFrameMessage: handleFrameMessage,
+  onChange: (place) => {
+    panelBtn.setAttribute("aria-pressed", String(place !== "hidden"));
+    const label = place === "window" ? "Put back beside the page" : "Open in a new window";
+    popoutBtn.title = label;
+    popoutBtn.setAttribute("aria-label", label);
+    if (place === "window" && book) panelWindow.setTitle(`Explanations — ${book.title}`);
+  },
 });
+popoutBtn.onclick = () => (panelWindow.place === "window" ? panelWindow.dock() : panelWindow.popOut());
+$("panel-close").onclick = () => panelWindow.hide();
+$("panel-collapse-all").onclick = () => explanations.toggleAll();
+panelBtn.onclick = () => panelWindow.toggle();
 
 // ---------- Wiring ----------
 
@@ -596,7 +445,7 @@ resizableSidebar(tocEl, $("toc-resizer"), {
   min: 180,
   initial: 280,
   storageKey: "visual-reader:toc-width",
-  other: () => $("panel"),
+  other: () => (panelWindow.place === "docked" ? panelEl : null),
 });
 resizableSidebar($("panel"), $("panel-resizer"), {
   side: "right",

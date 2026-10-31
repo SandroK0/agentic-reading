@@ -32,7 +32,13 @@ const contentsGenerator = new ContentsGenerator(providers);
 
 /** Widget HTML by explanation id, served at widget://w/<id>. */
 const widgets = new Map<string, string>();
-for (const e of store.allExplanations()) widgets.set(e.id, e.html);
+for (const e of store.allExplanations()) rememberWidgets(e);
+
+/** Makes an explanation's drawings, follow-ups included, servable at widget://w/<id>. */
+function rememberWidgets(e: Explanation) {
+  widgets.set(e.id, e.html);
+  for (const f of e.followUps ?? []) widgets.set(f.id, f.html);
+}
 
 let win: BrowserWindow | null = null;
 let pendingOpen: string | null = process.argv.find((a) => a.toLowerCase().endsWith(".pdf")) ?? null;
@@ -63,6 +69,28 @@ function registerProtocols() {
   });
 }
 
+/** Links open in the real browser and nothing navigates the app; only the panel pop-out may open a window. */
+function lockDown(contents: Electron.WebContents) {
+  contents.setWindowOpenHandler(({ url, frameName }) => {
+    if (url === "about:blank" && frameName === "explanations") {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: 520,
+          height: 860,
+          minWidth: 360,
+          minHeight: 400,
+          title: "Explanations",
+          ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 17 } } : {}),
+        },
+      };
+    }
+    if (url.startsWith("https://")) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  contents.on("will-navigate", (e) => e.preventDefault());
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1400,
@@ -84,11 +112,9 @@ function createWindow() {
   });
 
   // Links in explainers open in the real browser; nothing navigates the app.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) void shell.openExternal(url);
-    return { action: "deny" };
-  });
-  win.webContents.on("will-navigate", (e) => e.preventDefault());
+  lockDown(win.webContents);
+  // The Explanations panel can pop out into its own window; the renderer moves the panel into it.
+  win.webContents.on("did-create-window", (child) => lockDown(child.webContents));
   win.webContents.on("did-finish-load", () => {
     if (process.env.VR_SELFTEST) {
       void runSelfTest(win!, sendOpen, (code) => app.exit(code));
@@ -100,7 +126,11 @@ function createWindow() {
   // The toolbar leaves room for the window buttons, except in full screen where macOS hides them.
   win.on("enter-full-screen", () => win?.webContents.send("window:fullscreen", true));
   win.on("leave-full-screen", () => win?.webContents.send("window:fullscreen", false));
-  win.on("closed", () => (win = null));
+  win.on("closed", () => {
+    win = null;
+    // A popped-out panel has nothing to show without the reader.
+    for (const other of BrowserWindow.getAllWindows()) other.close();
+  });
   void win.loadURL("app://reader/index.html");
 }
 
@@ -175,7 +205,7 @@ function registerIpc() {
   ipcMain.handle("book:state", (_e, bookPath: string) => store.bookState(assertPdf(bookPath)));
   ipcMain.handle("book:save-page", (_e, bookPath: string, page: number) => store.savePage(assertPdf(bookPath), page));
   ipcMain.handle("explanation:save", (_e, bookPath: string, explanation: Explanation) => {
-    widgets.set(explanation.id, explanation.html);
+    rememberWidgets(explanation);
     store.saveExplanation(assertPdf(bookPath), explanation);
   });
   ipcMain.handle("explanation:delete", (_e, bookPath: string, id: string) => {

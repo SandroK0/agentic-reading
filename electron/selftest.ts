@@ -137,6 +137,54 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     }
     await new Promise((r) => setTimeout(r, 600));
 
+    // A card minimises to its header and remembers it; "collapse all" minimises every card, then expands them again.
+    const minimise = await js<{ cards: number; collapsed: boolean; bodyHidden: boolean; saved: boolean | null; allCollapsed: boolean; allExpanded: boolean }>(`(async () => {
+      const card = document.querySelector(".card");
+      if (!card) return { cards: 0, collapsed: false, bodyHidden: false, saved: null, allCollapsed: false, allExpanded: false };
+      card.querySelector(".card-toggle").click();
+      const collapsed = card.classList.contains("collapsed");
+      const bodyHidden = card.querySelector(".card-body").offsetParent === null;
+      await new Promise((r) => setTimeout(r, 300));
+      const saved = (await window.reader.bookState(${JSON.stringify(pdf)})).explanations[0]?.collapsed ?? null;
+      card.querySelector(".card-toggle").click();
+      document.getElementById("panel-collapse-all").click();
+      const allCollapsed = [...document.querySelectorAll(".card")].every((c) => c.classList.contains("collapsed"));
+      document.getElementById("panel-collapse-all").click();
+      const allExpanded = [...document.querySelectorAll(".card")].every((c) => !c.classList.contains("collapsed"));
+      return { cards: document.querySelectorAll(".card").length, collapsed, bodyHidden, saved, allCollapsed, allExpanded };
+    })()`);
+    const minimiseOk = minimise.cards === 0 || (minimise.collapsed && minimise.bodyHidden && minimise.saved === true && minimise.allCollapsed && minimise.allExpanded);
+    console.log(`[selftest] minimise cards: ok=${minimiseOk} ${JSON.stringify(minimise)}`);
+
+    // The Explanations panel hides, comes back, pops out into its own window, and docks again when that closes.
+    const { BrowserWindow } = await import("electron");
+    const pageWidth = () => js<number>(`document.querySelector(".page").offsetWidth`);
+    const widthDocked = await pageWidth();
+    await js(`document.getElementById("panel-close").click()`);
+    await new Promise((r) => setTimeout(r, 800));
+    const hidden = { panelHidden: await js<boolean>(`document.getElementById("panel").hidden`), pageWider: (await pageWidth()) > widthDocked };
+    await js(`document.getElementById("panel-btn").click()`);
+    await new Promise((r) => setTimeout(r, 800));
+    const shownAgain = await js<boolean>(`!document.getElementById("panel").hidden`);
+    await js(`document.getElementById("panel-popout").click()`);
+    await new Promise((r) => setTimeout(r, 2500));
+    const popup = BrowserWindow.getAllWindows().find((w) => w !== win);
+    const away = {
+      windows: BrowserWindow.getAllWindows().length,
+      panelInMain: await js<boolean>(`!!document.getElementById("panel")`),
+      popupCards: popup ? await popup.webContents.executeJavaScript(`document.querySelectorAll(".card").length`) : -1,
+      // Drawings report their height to the window they're in; still 120px would mean the messages are lost.
+      popupFrameHeights: popup ? await popup.webContents.executeJavaScript(`[...document.querySelectorAll(".card iframe")].map((f) => f.style.height)`) : [],
+      popupTheme: popup ? await popup.webContents.executeJavaScript(`document.documentElement.dataset.theme + " " + getComputedStyle(document.body).backgroundColor`) : "",
+    };
+    if (popup) fs.writeFileSync(path.join(out, "1f-panel-window.png"), (await popup.webContents.capturePage()).toPNG());
+    await shot("1f-panel-away");
+    popup?.close();
+    await new Promise((r) => setTimeout(r, 1000));
+    const back = await js<boolean>(`!!document.getElementById("panel") && !document.getElementById("panel").hidden`);
+    const panelOk = hidden.panelHidden && hidden.pageWider && shownAgain && away.windows === 2 && !away.panelInMain && back;
+    console.log(`[selftest] explanations panel: ok=${panelOk} ${JSON.stringify({ hidden, shownAgain, away, back })}`);
+
     // Drag both sidebar handles with the mouse; the page should re-fit to the new width.
     const sidebarDrag = async (handle: string, dx: number) => {
       const at = await js<[number, number]>(`(() => { const r = document.getElementById("${handle}").getBoundingClientRect(); return [r.left, r.top + 200]; })()`);
@@ -320,7 +368,7 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     }
 
     if (process.env.VR_SELFTEST_NO_EXPLAIN) {
-      return quit(toc.entries > 0 && jumped.clicked && floating && askingOk && zoomOk && resizeOk && !dragOk.includes(false) ? 0 : 1);
+      return quit(toc.entries > 0 && jumped.clicked && floating && askingOk && zoomOk && minimiseOk && panelOk && resizeOk && !dragOk.includes(false) ? 0 : 1);
     }
     // Without VR_SELFTEST_QUESTION, explain with the default (empty) question.
     if (!process.env.VR_SELFTEST_QUESTION) await js(`document.getElementById("selection-question").value = ""`);
@@ -363,25 +411,32 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     }
     console.log(`[selftest] finished=${done} in ${Math.round((Date.now() - started) / 1000)}s`, JSON.stringify(result));
 
-    // A follow-up continues the same conversation, through the parent card.
+    // A follow-up continues the same conversation, as a new turn inside the same card.
     if (done && !result.error && process.env.VR_SELFTEST_FOLLOWUP) {
+      const cardsBefore = await js<number>(`document.querySelectorAll(".card").length`);
       await js(`(() => {
         const form = document.querySelector(".card .followup");
         form.querySelector("input").value = "Say that again in one short sentence.";
         form.requestSubmit();
       })()`);
       const followed = await waitFor(
-        `document.querySelectorAll(".card").length >= 2 && !!document.querySelector(".card .followup:not([hidden])") && document.querySelector(".card").querySelector(".followup:not([hidden]), .status.error") !== null`,
+        `(() => { const c = document.querySelector(".card"); return c.querySelectorAll(".turn").length >= 2 && (!!c.querySelector(".followup:not([hidden])") || !!c.querySelector(".status.error")); })()`,
         180_000,
       );
-      const reply = await js<{ error: string | null; prose: string; quote: string }>(`({
-        error: document.querySelector(".card .status.error")?.textContent ?? null,
-        prose: document.querySelector(".card .prose")?.textContent ?? "",
-        quote: document.querySelector(".card .quote")?.textContent ?? "",
-      })`);
-      console.log(`[selftest] follow-up finished=${followed}`, JSON.stringify(reply));
+      const reply = await js<{ error: string | null; cards: number; turns: number; question: string; prose: string }>(`(() => {
+        const c = document.querySelector(".card"), last = [...c.querySelectorAll(".turn")].pop();
+        return {
+          error: c.querySelector(".status.error")?.textContent ?? null,
+          cards: document.querySelectorAll(".card").length,
+          turns: c.querySelectorAll(".turn").length,
+          question: last?.querySelector(".card-question")?.textContent ?? "",
+          prose: last?.querySelector(".prose")?.textContent ?? "",
+        };
+      })()`);
+      const saved = await js<number>(`window.reader.bookState(${JSON.stringify(pdf)}).then((s) => s.explanations[0]?.followUps?.length ?? 0)`);
+      console.log(`[selftest] follow-up finished=${followed} sameCard=${reply.cards === cardsBefore} savedFollowUps=${saved}`, JSON.stringify(reply));
       await shot("6-followup");
-      if (!followed || reply.error) return quit(1);
+      if (!followed || reply.error || reply.cards !== cardsBefore || saved < 1) return quit(1);
     }
     quit(done && !result.error ? 0 : 1);
   } catch (err) {

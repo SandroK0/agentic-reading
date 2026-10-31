@@ -237,11 +237,23 @@ body.resizing iframe { pointer-events: none; }
 .panel-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   padding: 10px 14px;
   border-bottom: 0.5px solid var(--border);
   font-weight: 500;
 }
+.panel-title { flex: 1; min-width: 0; }
+.icon-btn { width: 30px; padding: 0; display: grid; place-items: center; border-color: transparent; color: var(--text-2); }
+.icon-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+#panel-popout .when-window, .panel-window #panel-popout .when-docked { display: none; }
+.panel-window #panel-popout .when-window { display: inline; }
+#panel-btn[aria-pressed="true"] { background: var(--surface); }
+.layout.panel-away #panel-resizer { display: none; }
+/* The panel on its own in a pop-out window: it fills the window, and its header is the title bar. */
+:root.panel-window .panel { width: auto !important; flex: 1; min-height: 0; border-left: none; }
+:root.panel-window .panel-head { -webkit-app-region: drag; user-select: none; min-height: 50px; }
+:root.panel-window .panel-head button { -webkit-app-region: no-drag; }
+:root.panel-window.inset-titlebar .panel-head { padding-left: 86px; }
 .cards { flex: 1; overflow: auto; padding: 12px; background: var(--canvas); display: flex; flex-direction: column; gap: 12px; }
 .hint { text-align: center; margin-top: 40px; }
 
@@ -250,6 +262,20 @@ body.resizing iframe { pointer-events: none; }
 .page-link { height: 24px; padding: 0 8px; font-size: 12px; flex-shrink: 0; }
 .quote { flex: 1; min-width: 0; font-size: 13px; color: var(--text-2); font-style: italic; }
 .card-question { margin: 6px 14px 0; padding: 6px 10px; border-radius: var(--radius); background: var(--accent-bg); color: var(--text); font-size: 13px; font-weight: 500; }
+/* The head doubles as the minimise toggle; a minimised card shows only it, with a short note. */
+.card-summary { flex: 1; min-width: 0; height: auto; padding: 0; border: none; text-align: left; display: flex; flex-direction: column; gap: 3px; cursor: pointer; }
+.card-summary:hover:not(:disabled) { background: none; }
+.card-summary:hover .quote { color: var(--text); }
+.card-meta { font-size: 12px; color: var(--muted); }
+.card:not(.collapsed) .card-meta, .card-meta:empty { display: none; }
+.card-toggle { height: 24px; width: 24px; padding: 0; border: none; color: var(--text-2); flex-shrink: 0; display: grid; place-items: center; }
+.card-toggle svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform 120ms; }
+.card.collapsed .card-toggle svg { transform: rotate(-90deg); }
+.card.collapsed .card-body { display: none; }
+.card.collapsed .card-head { padding-bottom: 10px; }
+.card.collapsed .quote { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* Follow-ups continue the thread inside the same card. */
+.turn + .turn { margin-top: 10px; border-top: 0.5px solid var(--border); padding-top: 2px; }
 .card-delete { height: 24px; width: 24px; padding: 0; border: none; color: var(--text-2); flex-shrink: 0; }
 .prose { padding: 10px 14px 2px; font-family: var(--font-prose); font-size: 15px; line-height: 1.55; }
 .prose p { margin: 0 0 8px; }
