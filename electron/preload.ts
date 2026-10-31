@@ -18,10 +18,14 @@ const api: ReaderApi = {
   onExplainEvent: (listener) => {
     ipcRenderer.on("explain:event", (_e, event: ExplainEvent) => listener(event));
   },
+  platform: process.platform,
+  onFullscreen: (listener) => {
+    ipcRenderer.on("window:fullscreen", (_e, fullscreen: boolean) => listener(fullscreen));
+  },
   onOpenBook: (listener) => {
     ipcRenderer.on("book:open", (_e, path: string) => listener(path));
   },
-  widgetUrl: (id) => `widget://w/${encodeURIComponent(id)}`,
+  widgetUrl: (id, theme) => `widget://w/${encodeURIComponent(id)}?theme=${encodeURIComponent(theme)}`,
 };
 
 contextBridge.exposeInMainWorld("reader", api);

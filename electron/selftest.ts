@@ -11,6 +11,7 @@ import path from "node:path";
  * VR_SELFTEST_MODE=text uses Explain instead of Explain visually, and
  * VR_SELFTEST_FOLLOWUP=1 also asks a follow-up on the new card.
  * VR_SELFTEST_QUESTION="…" types a question into the selection menu first.
+ * VR_SELFTEST_THEMES=1 screenshots every theme in light and dark.
  */
 export async function runSelfTest(win: BrowserWindow, open: (p: string) => void, quit: (code: number) => void) {
   const pdf = process.env.VR_SELFTEST!;
@@ -236,6 +237,26 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     const askingOk = asking.open && asking.focused && asking.value === question && asking.marked > 20;
     console.log(`[selftest] question box: ok=${askingOk} ${JSON.stringify(asking)}`);
     await shot("2d-question");
+
+    // Every theme, in light and dark: a screenshot of each, and the drawings must follow.
+    if (process.env.VR_SELFTEST_THEMES) {
+      const { nativeTheme } = await import("electron");
+      const ids = await js<string[]>(`[...document.getElementById("theme").options].map((o) => o.value)`);
+      for (const scheme of ["light", "dark"] as const) {
+        nativeTheme.themeSource = scheme;
+        for (const id of ids) {
+          await js(`(() => { const s = document.getElementById("theme"); s.value = "${id}"; s.dispatchEvent(new Event("change")); })()`);
+          await new Promise((r) => setTimeout(r, 900));
+          const look = await js<{ bg: string; frames: string[] }>(`({
+            bg: getComputedStyle(document.body).backgroundColor,
+            frames: [...document.querySelectorAll(".card iframe")].map((f) => new URL(f.src).searchParams.get("theme")),
+          })`);
+          console.log(`[selftest] theme ${id}/${scheme}: ${JSON.stringify(look)}`);
+          await shot(`theme-${id}-${scheme}`);
+        }
+      }
+      nativeTheme.themeSource = "system";
+    }
 
     if (process.env.VR_SELFTEST_NO_EXPLAIN) {
       return quit(toc.entries > 0 && jumped.clicked && floating && askingOk && resizeOk && !dragOk.includes(false) ? 0 : 1);

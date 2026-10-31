@@ -2,6 +2,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 import type { ExplainEvent, ExplainMode, ExplainRequest, Explanation, ReaderApi } from "../shared/types";
 import { Pages } from "./pages";
+import { allThemesCss, themeById, THEMES } from "../shared/themes";
 import { renderProse } from "./prose";
 import { resizableSidebar } from "./resize";
 import { enableTextSelection } from "./selection";
@@ -31,6 +32,7 @@ const prevBtn = $<HTMLButtonElement>("prev");
 const nextBtn = $<HTMLButtonElement>("next");
 const zoomLabel = $("zoom-label");
 const modelSelect = $<HTMLSelectElement>("model");
+const themeSelect = $<HTMLSelectElement>("theme");
 const selectionMenu = $("selection-menu");
 const questionInput = $<HTMLInputElement>("selection-question");
 const explainPageBtn = $<HTMLButtonElement>("explain-page");
@@ -127,6 +129,40 @@ function setZoom(zoom: number) {
   zoomLabel.textContent = `${Math.round(pages.zoomLevel * 100)}%`;
 }
 
+// ---------- Window ----------
+
+// On macOS the window buttons sit inside the toolbar (see createWindow); make room for them.
+document.documentElement.classList.toggle("inset-titlebar", api.platform === "darwin");
+api.onFullscreen((fullscreen) => document.documentElement.classList.toggle("fullscreen", fullscreen));
+
+// ---------- Theme ----------
+
+const THEME_KEY = "visual-reader:theme";
+
+const themeStyle = document.createElement("style");
+themeStyle.textContent = allThemesCss();
+document.head.append(themeStyle);
+
+function currentTheme(): string {
+  return document.documentElement.dataset.theme ?? "ink";
+}
+
+/** Applies a theme to the reader and re-renders open drawings in it. */
+function applyTheme(id: string | null) {
+  const theme = themeById(id);
+  document.documentElement.dataset.theme = theme.id;
+  themeSelect.value = theme.id;
+  try {
+    localStorage.setItem(THEME_KEY, theme.id);
+  } catch {
+    // the choice just won't persist
+  }
+  for (const card of cards.values()) if (card.frame) card.frame.src = api.widgetUrl(card.data.id, theme.id);
+}
+
+themeSelect.append(...THEMES.map((t) => new Option(t.label, t.id)));
+themeSelect.onchange = () => applyTheme(themeSelect.value);
+
 // ---------- Contents sidebar ----------
 
 const TOC_KEY = "visual-reader:toc-visible";
@@ -188,7 +224,8 @@ function showMenu(rect: DOMRect, upward: boolean) {
   selectionMenu.hidden = false;
   const w = selectionMenu.offsetWidth;
   const h = selectionMenu.offsetHeight;
-  const left = Math.min(Math.max(8, rect.left - box.left - w / 2), box.width - w - 8);
+  // clientWidth leaves out the scrollbar, so the menu never sticks out under it.
+  const left = Math.min(Math.max(8, rect.left - box.left - w / 2), viewer.clientWidth - w - 8);
   let top = upward ? rect.top - box.top - h - 8 : rect.bottom - box.top + 8;
   // Keep it inside the visible part of the viewer.
   top = Math.min(Math.max(8, top), viewer.clientHeight - h - 8);
@@ -325,7 +362,7 @@ function showWidget(card: Card) {
   const frame = document.createElement("iframe");
   frame.setAttribute("sandbox", "allow-scripts");
   frame.title = "Visual explainer";
-  frame.src = api.widgetUrl(card.data.id);
+  frame.src = api.widgetUrl(card.data.id, currentTheme());
   card.status.before(frame);
   card.frame = frame;
 }
@@ -562,4 +599,13 @@ async function loadModels() {
   if (modelSelect.selectedIndex < 0) modelSelect.selectedIndex = 0;
 }
 void loadModels();
+applyTheme(storedTheme());
+
+function storedTheme(): string | null {
+  try {
+    return localStorage.getItem(THEME_KEY);
+  } catch {
+    return null;
+  }
+}
 void showRecents();

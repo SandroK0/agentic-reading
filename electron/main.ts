@@ -50,10 +50,11 @@ function registerProtocols() {
   });
 
   protocol.handle("widget", (req) => {
-    const id = decodeURIComponent(new URL(req.url).pathname.replace(/^\/+/, ""));
+    const url = new URL(req.url);
+    const id = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
     const html = widgets.get(id);
     if (html === undefined) return new Response("Not found", { status: 404 });
-    return new Response(widgetPage(html), {
+    return new Response(widgetPage(html, url.searchParams.get("theme")), {
       headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": WIDGET_CSP },
     });
   });
@@ -67,6 +68,8 @@ function createWindow() {
     minHeight: 600,
     title: "Agentic Reading",
     backgroundColor: "#f6f5f1",
+    // On macOS the toolbar doubles as the title bar, with the window buttons inset into it.
+    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 16, y: 17 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -91,6 +94,9 @@ function createWindow() {
     if (pendingOpen) sendOpen(pendingOpen);
     pendingOpen = null;
   });
+  // The toolbar leaves room for the window buttons, except in full screen where macOS hides them.
+  win.on("enter-full-screen", () => win?.webContents.send("window:fullscreen", true));
+  win.on("leave-full-screen", () => win?.webContents.send("window:fullscreen", false));
   win.on("closed", () => (win = null));
   void win.loadURL("app://reader/index.html");
 }

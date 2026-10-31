@@ -5,6 +5,8 @@
  * allow-scripts only (opaque origin, no access to the app or its APIs).
  */
 
+import { themeById, themeCss } from "../shared/themes";
+
 const CDNS = "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com";
 
 export const WIDGET_CSP = [
@@ -18,27 +20,9 @@ export const WIDGET_CSP = [
 ].join("; ");
 
 const BASE_CSS = `
-:root {
-  color-scheme: light dark;
-  --bg: #ffffff; --surface: #f6f5f1; --text: #1f1e1d; --text-2: #5f5e5a; --muted: #8a8880;
-  --border: rgba(0,0,0,.14); --accent: #185fa5; --accent-bg: #e6f1fb;
-  --good: #3b6d11; --good-bg: #eaf3de; --warn: #854f0b; --warn-bg: #faeeda; --bad: #a32d2d; --bad-bg: #fcebeb;
-  --c1: #eeedfe; --c1-text: #3c3489; --c2: #e1f5ee; --c2-text: #085041;
-  --c3: #faece7; --c3-text: #712b13; --c4: #fbeaf0; --c4-text: #72243e;
-  --mono: ui-monospace, "SF Mono", Menlo, monospace; --radius: 8px;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #262624; --surface: #30302e; --text: #f0eee6; --text-2: #b4b2a9; --muted: #888780;
-    --border: rgba(255,255,255,.16); --accent: #85b7eb; --accent-bg: #0c447c;
-    --good: #97c459; --good-bg: #27500a; --warn: #ef9f27; --warn-bg: #633806; --bad: #f09595; --bad-bg: #791f1f;
-    --c1: #3c3489; --c1-text: #cecbf6; --c2: #085041; --c2-text: #9fe1cb;
-    --c3: #712b13; --c3-text: #f5c4b3; --c4: #72243e; --c4-text: #f4c0d1;
-  }
-}
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
-body { font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 14px; overflow-wrap: anywhere; }
+body { font: 14px/1.6 var(--font-ui); padding: 14px; overflow-wrap: anywhere; -webkit-font-smoothing: antialiased; }
 h1, h2, h3, h4 { font-weight: 500; margin: 0 0 .5em; } h3 { font-size: 15px; }
 code, pre { font-family: var(--mono); font-size: 13px; }
 button, input, select, textarea { font: inherit; color: var(--text); }
@@ -61,9 +45,11 @@ const BRIDGE = `
 })();
 `;
 
-export function widgetPage(fragment: string): string {
+/** A full widget page for `fragment`, in the app's theme `themeId` so it matches the reader around it. */
+export function widgetPage(fragment: string, themeId: string | null): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>${BASE_CSS}</style><script>${BRIDGE}</script></head>
+<style>${themeCss(themeById(themeId), ":root")}
+${BASE_CSS}</style><script>${BRIDGE}</script></head>
 <body>${fragment}</body></html>`;
 }

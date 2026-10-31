@@ -94,6 +94,9 @@ export interface ReaderApi {
   cancel(id: string): Promise<void>;
   onExplainEvent(listener: (event: ExplainEvent) => void): void;
   onOpenBook(listener: (path: string) => void): void;
-  /** URL that serves an explainer's HTML inside a sandboxed frame. */
-  widgetUrl(id: string): string;
+  /** The OS, e.g. "darwin", for platform-specific layout. */
+  platform: string;
+  onFullscreen(listener: (fullscreen: boolean) => void): void;
+  /** URL that serves an explainer's HTML inside a sandboxed frame, styled in theme `theme`. */
+  widgetUrl(id: string, theme: string): string;
 }

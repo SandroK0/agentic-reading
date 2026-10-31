@@ -32,6 +32,7 @@ After the first build, `npx electron .` opens it without rebuilding.
 - **Read:** scroll through the book continuously, or jump a page with ‹ › or the ← → keys. Use − + to zoom. The app remembers your page in each book.
 - **Explain a passage:** select text, then click **Explain** (`E`) for a few sentences, or **Explain visually** (`V`) for a drawing. **Explain this page** draws the whole page.
 - **Follow up:** type a question under any explainer. Follow-ups continue the same conversation and keep its style, so Claude remembers the passage.
+- **Pick a theme** in the toolbar: Paper & Ink, Graphite & Violet and Forest Study follow your system's light or dark mode; Night Library is always dark and dims the page. Drawings follow the theme. Themes live in `shared/themes.ts`.
 - **Pick a model** in the toolbar: Sonnet is faster, Opus gives the best results.
 - Explainers are saved per book. Click a card's page badge to jump back to that page.
 
