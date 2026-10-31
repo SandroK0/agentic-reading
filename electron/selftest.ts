@@ -76,6 +76,33 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     console.log("[selftest] scroll:", JSON.stringify({ ...scrolled, ...afterScroll }));
     await shot("1c-scrolled");
 
+    // Ctrl + scroll zooms around the pointer: the zoom changes and the text under the pointer stays put.
+    await js(`(() => { const i = document.getElementById("page-input"); i.value = "${page}"; i.dispatchEvent(new Event("change")); })()`);
+    await new Promise((r) => setTimeout(r, 1000));
+    const probe = `(() => {
+      const v = document.getElementById("viewer").getBoundingClientRect();
+      const x = v.left + v.width / 2, y = v.top + v.height * 0.6;
+      const caret = document.caretPositionFromPoint(x, y);
+      const span = caret?.offsetNode?.parentElement;
+      return { x, y, zoom: document.getElementById("zoom-label").textContent, text: span?.textContent?.slice(0, 30) ?? null };
+    })()`;
+    const unzoomed = await js<{ x: number; y: number; zoom: string; text: string | null }>(probe);
+    for (let i = 0; i < 4; i++) {
+      win.webContents.sendInputEvent({ type: "mouseWheel", x: Math.round(unzoomed.x), y: Math.round(unzoomed.y), deltaX: 0, deltaY: 120, modifiers: ["control"] });
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    await new Promise((r) => setTimeout(r, 600));
+    const zoomed = await js<{ zoom: string; text: string | null }>(probe);
+    const zoomOk = zoomed.zoom !== unzoomed.zoom && !!unzoomed.text && zoomed.text === unzoomed.text;
+    console.log(`[selftest] ctrl+scroll zoom: ok=${zoomOk} ${JSON.stringify({ unzoomed, zoomed })}`);
+    await shot("1e-zoomed");
+    // The same notches the other way undo the zoom exactly, since each one scales by a fixed factor.
+    for (let i = 0; i < 4; i++) {
+      win.webContents.sendInputEvent({ type: "mouseWheel", x: Math.round(unzoomed.x), y: Math.round(unzoomed.y), deltaX: 0, deltaY: -120, modifiers: ["control"] });
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    await new Promise((r) => setTimeout(r, 600));
+
     // Drag both sidebar handles with the mouse; the page should re-fit to the new width.
     const sidebarDrag = async (handle: string, dx: number) => {
       const at = await js<[number, number]>(`(() => { const r = document.getElementById("${handle}").getBoundingClientRect(); return [r.left, r.top + 200]; })()`);
@@ -259,7 +286,7 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     }
 
     if (process.env.VR_SELFTEST_NO_EXPLAIN) {
-      return quit(toc.entries > 0 && jumped.clicked && floating && askingOk && resizeOk && !dragOk.includes(false) ? 0 : 1);
+      return quit(toc.entries > 0 && jumped.clicked && floating && askingOk && zoomOk && resizeOk && !dragOk.includes(false) ? 0 : 1);
     }
     // Without VR_SELFTEST_QUESTION, explain with the default (empty) question.
     if (!process.env.VR_SELFTEST_QUESTION) await js(`document.getElementById("selection-question").value = ""`);

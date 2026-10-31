@@ -124,10 +124,26 @@ function showPage(n: number) {
   savePageTimer = setTimeout(() => api.savePage(path, n), 400);
 }
 
-function setZoom(zoom: number) {
-  pages.setZoom(Math.min(3, Math.max(0.5, zoom)));
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3;
+
+function setZoom(zoom: number, anchor?: { x: number; y: number }) {
+  pages.setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), anchor);
   zoomLabel.textContent = `${Math.round(pages.zoomLevel * 100)}%`;
 }
+
+// Ctrl + scroll zooms around the pointer. A trackpad pinch arrives the same way, in smaller steps.
+viewer.addEventListener(
+  "wheel",
+  (e) => {
+    if (!e.ctrlKey || !book) return;
+    e.preventDefault();
+    const delta = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 16 : e.deltaY;
+    const box = viewer.getBoundingClientRect();
+    setZoom(pages.zoomLevel * Math.exp(-delta * 0.0015), { x: e.clientX - box.left, y: e.clientY - box.top });
+  },
+  { passive: false },
+);
 
 // ---------- Window ----------
 

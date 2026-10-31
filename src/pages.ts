@@ -12,6 +12,8 @@ const RENDER_MARGIN = "150% 0px";
 /** The point down the viewport that decides which page you're "on". */
 const READING_LINE = 0.3;
 const MAX_FIT_SCALE = 2.2;
+/** How long zooming has to pause before pages are re-drawn sharp at the new size. */
+const REDRAW_AFTER_ZOOM_MS = 150;
 
 interface Slot {
   n: number;
@@ -35,6 +37,7 @@ export class Pages {
   private texts = new Map<number, string>();
   private observer: IntersectionObserver;
   private scrollQueued = false;
+  private redrawTimer: ReturnType<typeof setTimeout> | undefined;
   current = 1;
 
   constructor(
@@ -92,20 +95,35 @@ export class Pages {
     return this.zoom;
   }
 
-  setZoom(zoom: number) {
+  /**
+   * Zooms, keeping the point under `anchor` (viewer-relative pixels) in place,
+   * or the reading line when there's no anchor. Pages stretch right away and
+   * are re-drawn sharp once zooming pauses, so a pinch or a fast scroll stays smooth.
+   */
+  setZoom(zoom: number, anchor?: { x: number; y: number }) {
+    if (zoom === this.zoom) return;
     this.zoom = zoom;
-    this.relayout();
+    this.relayout(anchor);
   }
 
   /** Re-fits pages to the viewer's width, keeping the same spot in view. */
-  relayout() {
+  relayout(anchor?: { x: number; y: number }) {
     if (!this.slots.length) return;
-    const line = this.viewer.scrollTop + this.viewer.clientHeight * READING_LINE;
-    const slot = this.slots[this.current - 1];
+    const ax = anchor?.x ?? this.viewer.clientWidth / 2;
+    const ay = anchor?.y ?? this.viewer.clientHeight * READING_LINE;
+    const line = this.viewer.scrollTop + ay;
+    const slot = this.slots[this.slotAt(line)];
     const along = (line - this.top(slot)) / slot.el.offsetHeight;
+    const oldScale = this.scale;
+    const across = this.viewer.scrollLeft + ax;
+
     this.layout();
-    this.viewer.scrollTop = this.top(slot) + along * slot.el.offsetHeight - this.viewer.clientHeight * READING_LINE;
-    for (const s of this.near) void this.draw(s);
+    this.viewer.scrollTop = this.top(slot) + along * slot.el.offsetHeight - ay;
+    this.viewer.scrollLeft = across * (this.scale / oldScale) - ax;
+    clearTimeout(this.redrawTimer);
+    this.redrawTimer = setTimeout(() => {
+      for (const s of this.near) void this.draw(s);
+    }, REDRAW_AFTER_ZOOM_MS);
   }
 
   /** The page's plain text, cached once read. */
@@ -153,8 +171,11 @@ export class Pages {
 
   private track() {
     if (!this.slots.length) return;
-    const line = this.viewer.scrollTop + this.viewer.clientHeight * READING_LINE;
-    // Pages are stacked top to bottom, so find the last one starting above the line.
+    this.setCurrent(this.slotAt(this.viewer.scrollTop + this.viewer.clientHeight * READING_LINE) + 1);
+  }
+
+  /** Index of the page at `line` (scroll-content pixels): the last one starting above it. */
+  private slotAt(line: number): number {
     let lo = 0;
     let hi = this.slots.length - 1;
     while (lo < hi) {
@@ -162,7 +183,7 @@ export class Pages {
       if (this.top(this.slots[mid]) <= line) lo = mid;
       else hi = mid - 1;
     }
-    this.setCurrent(lo + 1);
+    return lo;
   }
 
   private setCurrent(n: number, force = false) {
