@@ -1,6 +1,17 @@
 /** Types shared by the Electron main process, the preload and the renderer. */
 
-export type ModelChoice = "sonnet" | "opus";
+/** One turn of a conversation with the model, kept so follow-ups work with any provider. */
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** What the model menu offers: each provider and its models. */
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  models: { id: string; label: string }[];
+}
 
 /** "text": a short written explanation. "visual": a brief caption plus a static drawing. */
 export type ExplainMode = "text" | "visual";
@@ -16,16 +27,24 @@ export interface ExplainRequest {
   passage: string;
   /** Text around the passage (or the page text), for grounding. */
   context: string;
-  /** A follow-up question; when set, `sessionId` continues the earlier chat. */
+  /** A follow-up question, continuing the conversation of explanation `parentId`. */
   question?: string;
-  sessionId?: string;
+  parentId?: string;
   mode: ExplainMode;
-  model: ModelChoice;
 }
 
 export type ExplainEvent =
   | { id: string; type: "text"; text: string }
-  | { id: string; type: "done"; prose: string; html: string; sessionId: string }
+  | {
+      id: string;
+      type: "done";
+      prose: string;
+      html: string;
+      provider: string;
+      model: string;
+      resume?: string;
+      conversation: ChatMessage[];
+    }
   | { id: string; type: "error"; message: string };
 
 export interface Explanation {
@@ -37,7 +56,15 @@ export interface Explanation {
   mode?: ExplainMode;
   prose: string;
   html: string;
-  sessionId: string;
+  /** Which provider and model wrote it. Missing on older saves, which came from the Claude CLI. */
+  provider?: string;
+  model?: string;
+  /** The provider's handle for resuming the conversation, if it has one. */
+  resume?: string;
+  /** The conversation up to and including this reply. Missing on older saves. */
+  conversation?: ChatMessage[];
+  /** Claude CLI session id from older saves; superseded by `resume`. */
+  sessionId?: string;
   createdAt: number;
 }
 
@@ -47,7 +74,8 @@ export interface BookState {
 }
 
 export interface Settings {
-  model: ModelChoice;
+  provider: string;
+  model: string;
 }
 
 export interface ReaderApi {
@@ -61,6 +89,7 @@ export interface ReaderApi {
   deleteExplanation(path: string, id: string): Promise<void>;
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<void>;
+  providers(): Promise<ProviderInfo[]>;
   explain(request: ExplainRequest): Promise<void>;
   cancel(id: string): Promise<void>;
   onExplainEvent(listener: (event: ExplainEvent) => void): void;

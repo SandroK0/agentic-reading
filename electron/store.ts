@@ -16,7 +16,7 @@ export class Store {
   private state: State;
 
   constructor(private file: string) {
-    this.state = { recents: [], books: {}, settings: { model: "sonnet" } };
+    this.state = { recents: [], books: {}, settings: { provider: "claude-cli", model: "sonnet" } };
     try {
       const saved = JSON.parse(fs.readFileSync(file, "utf8"));
       this.state = { ...this.state, ...saved, settings: { ...this.state.settings, ...saved.settings } };

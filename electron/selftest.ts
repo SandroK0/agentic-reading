@@ -8,7 +8,8 @@ import path from "node:path";
  * Opens the book, checks the contents sidebar, selects the first few lines of
  * the page, clicks "Explain visually", waits for the explainer, saves
  * screenshots and quits. VR_SELFTEST_NO_EXPLAIN=1 stops before calling Claude;
- * VR_SELFTEST_MODE=text uses Explain instead of Explain visually.
+ * VR_SELFTEST_MODE=text uses Explain instead of Explain visually, and
+ * VR_SELFTEST_FOLLOWUP=1 also asks a follow-up on the new card.
  */
 export async function runSelfTest(win: BrowserWindow, open: (p: string) => void, quit: (code: number) => void) {
   const pdf = process.env.VR_SELFTEST!;
@@ -255,6 +256,27 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
       solo.destroy();
     }
     console.log(`[selftest] finished=${done} in ${Math.round((Date.now() - started) / 1000)}s`, JSON.stringify(result));
+
+    // A follow-up continues the same conversation, through the parent card.
+    if (done && !result.error && process.env.VR_SELFTEST_FOLLOWUP) {
+      await js(`(() => {
+        const form = document.querySelector(".card .followup");
+        form.querySelector("input").value = "Say that again in one short sentence.";
+        form.requestSubmit();
+      })()`);
+      const followed = await waitFor(
+        `document.querySelectorAll(".card").length >= 2 && !!document.querySelector(".card .followup:not([hidden])") && document.querySelector(".card").querySelector(".followup:not([hidden]), .status.error") !== null`,
+        180_000,
+      );
+      const reply = await js<{ error: string | null; prose: string; quote: string }>(`({
+        error: document.querySelector(".card .status.error")?.textContent ?? null,
+        prose: document.querySelector(".card .prose")?.textContent ?? "",
+        quote: document.querySelector(".card .quote")?.textContent ?? "",
+      })`);
+      console.log(`[selftest] follow-up finished=${followed}`, JSON.stringify(reply));
+      await shot("6-followup");
+      if (!followed || reply.error) return quit(1);
+    }
     quit(done && !result.error ? 0 : 1);
   } catch (err) {
     console.error("[selftest] failed:", err);

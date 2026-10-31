@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ExplainEvent, ExplainRequest, Explanation, Settings } from "../shared/types";
-import { cancel, cancelAll, explain } from "./claude";
+import { Explainer } from "./explainer";
+import { createProviders } from "./llm";
 import { runSelfTest } from "./selftest";
 import { Store } from "./store";
 import { WIDGET_CSP, widgetPage } from "./widget";
@@ -13,7 +14,7 @@ if (process.env.VR_SELFTEST) app.setPath("userData", path.join(app.getPath("temp
 
 const RENDERER_DIR = path.join(__dirname, "..", "renderer");
 const store = new Store(path.join(app.getPath("userData"), "state.json"));
-const workDir = path.join(app.getPath("userData"), "claude-workdir");
+const explainer = new Explainer(createProviders({ workDir: path.join(app.getPath("userData"), "claude-workdir") }));
 
 /** Widget HTML by explanation id, served at widget://w/<id>. */
 const widgets = new Map<string, string>();
@@ -169,9 +170,12 @@ function registerIpc() {
       if (event.type === "done") widgets.set(event.id, event.html);
       if (!e.sender.isDestroyed()) e.sender.send("explain:event", event);
     };
-    void explain(req, workDir, emit);
+    const bookPath = assertPdf(req.bookPath);
+    const parent = req.parentId ? store.bookState(bookPath).explanations.find((x) => x.id === req.parentId) : undefined;
+    void explainer.explain(req, store.settings(), parent, emit);
   });
-  ipcMain.handle("explain:cancel", (_e, id: string) => cancel(id));
+  ipcMain.handle("explain:cancel", (_e, id: string) => explainer.cancel(id));
+  ipcMain.handle("llm:providers", () => explainer.catalog());
 }
 
 // macOS "Open with" / dropping a PDF on the Dock icon.
@@ -193,4 +197,4 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-app.on("before-quit", cancelAll);
+app.on("before-quit", () => explainer.cancelAll());

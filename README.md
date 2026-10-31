@@ -39,12 +39,24 @@ After the first build, `npx electron .` opens it without rebuilding.
 
 | Piece | What it does |
 | --- | --- |
-| `electron/claude.ts` | Runs `claude -p` headless with streaming JSON output, no tools, no user or project settings and no MCP servers. It removes `ANTHROPIC_API_KEY` from the environment so the CLI uses your subscription. |
+| `electron/explainer.ts` | Turns a request into an explanation with whichever provider is selected: builds the prompts, carries the conversation for follow-ups, streams progress and parses the reply |
+| `electron/llm/provider.ts` | The `LlmProvider` interface, the only way the app talks to a model |
+| `electron/llm/claude-cli.ts` | The Claude Code provider. Runs `claude -p` headless with streaming JSON output, no tools, no user or project settings and no MCP servers. It removes `ANTHROPIC_API_KEY` from the environment so the CLI uses your subscription, and resumes follow-ups from the CLI's session. |
+| `electron/llm/index.ts` | The list of available providers |
 | `electron/prompt.ts` | The system prompts, one per mode: a short `<explanation>`, or a caption plus a static `<widget>` drawing and the design rules it follows |
 | `electron/widget.ts` | Wraps each widget with theme tokens and base styles. Each widget runs at `widget://` in an iframe sandboxed to `allow-scripts`, under a CSP that only allows cdnjs, jsDelivr and unpkg |
 | `electron/main.ts` | Window, File menu, the `app://` and `widget://` protocols, and IPC |
 | `electron/store.ts` | `state.json` in the app's data folder: recent books, page per book, saved explainers, settings |
 | `src/main.ts` | The renderer: PDF.js viewer and text layer, selection, explainer cards with live streaming |
+
+### Adding a model provider
+
+Model access is behind one interface, so supporting a local model or an API means adding a provider, not changing the app:
+
+1. Create `electron/llm/<name>.ts` with a class that implements `LlmProvider`: an `id`, a `label`, its `models` and a `chat()` method. `chat()` gets the system prompt and the whole conversation as messages, streams text through `onText`, and stops when `signal` aborts.
+2. Add it to the list in `electron/llm/index.ts`.
+
+The model menu groups models by provider once there's more than one. Conversations are saved as plain messages, so follow-ups keep working when someone switches provider. A provider that can resume a conversation more cheaply (like the Claude CLI's sessions) can return a `resume` handle; others can ignore it.
 
 ## Testing
 

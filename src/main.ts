@@ -1,6 +1,6 @@
 import * as pdfjsLib from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
-import type { ExplainEvent, ExplainMode, ExplainRequest, Explanation, ModelChoice, ReaderApi } from "../shared/types";
+import type { ExplainEvent, ExplainMode, ExplainRequest, Explanation, ReaderApi } from "../shared/types";
 import { Pages } from "./pages";
 import { renderProse } from "./prose";
 import { resizableSidebar } from "./resize";
@@ -51,7 +51,6 @@ interface Book {
 }
 
 let book: Book | null = null;
-let model: ModelChoice = "sonnet";
 
 // ---------- Opening books ----------
 
@@ -311,7 +310,7 @@ function finishCard(card: Card) {
   card.status.className = "status";
   card.status.hidden = true;
   showWidget(card);
-  card.followup.hidden = !card.data.sessionId;
+  card.followup.hidden = false;
 }
 
 function renderCards(explanations: Explanation[]) {
@@ -341,12 +340,12 @@ function setStatus(card: Card, text: string, opts: { error?: boolean; thinking?:
   card.status.replaceChildren(...parts);
 }
 
-function start(card: Card, req: Omit<ExplainRequest, "id" | "model">) {
+function start(card: Card, req: Omit<ExplainRequest, "id">) {
   cardsEl.prepend(card.el);
   cardsEl.scrollTop = 0;
   updateCount();
   setStatus(card, "Thinking", { thinking: true, stop: true });
-  void api.explain({ ...req, id: card.data.id, model });
+  void api.explain({ ...req, id: card.data.id });
 }
 
 async function explainPassage(page: number, passage: string, mode: ExplainMode) {
@@ -367,7 +366,7 @@ async function explainPassage(page: number, passage: string, mode: ExplainMode) 
 }
 
 function askFollowup(parent: Card, question: string) {
-  if (!book || !parent.data.sessionId) return;
+  if (!book) return;
   const mode = parent.data.mode ?? "visual";
   const card = makeCard({ id: newId(), page: parent.data.page, passage: parent.data.passage, question, mode }, book.path);
   start(card, {
@@ -379,7 +378,7 @@ function askFollowup(parent: Card, question: string) {
     passage: parent.data.passage,
     context: "",
     question,
-    sessionId: parent.data.sessionId,
+    parentId: parent.data.id,
   });
 }
 
@@ -394,7 +393,8 @@ api.onExplainEvent((event: ExplainEvent) => {
   } else if (event.type === "error") {
     setStatus(card, event.message, { error: true });
   } else {
-    Object.assign(card.data, { prose: event.prose, html: event.html, sessionId: event.sessionId, createdAt: Date.now() });
+    const { prose, html, provider, model, resume, conversation } = event;
+    Object.assign(card.data, { prose, html, provider, model, resume, conversation, createdAt: Date.now() });
     finishCard(card);
     void api.saveExplanation(card.bookPath, card.data as Explanation);
   }
@@ -428,9 +428,10 @@ pageInput.onchange = () => pages.goTo(Number(pageInput.value));
 $("zoom-in").onclick = () => setZoom(pages.zoomLevel + 0.25);
 $("zoom-out").onclick = () => setZoom(pages.zoomLevel - 0.25);
 
+// Options are "<provider>/<model>"; provider ids never contain a slash.
 modelSelect.onchange = () => {
-  model = modelSelect.value as ModelChoice;
-  void api.saveSettings({ model });
+  const [provider, ...rest] = modelSelect.value.split("/");
+  void api.saveSettings({ provider, model: rest.join("/") });
 };
 
 // Keep the selection alive when a menu button is pressed.
@@ -500,8 +501,22 @@ new ResizeObserver(() => {
   }, 120);
 }).observe(viewer);
 
-void api.settings().then((s) => {
-  model = s.model;
-  modelSelect.value = s.model;
-});
+/** Fills the model menu from the available providers, grouped when there's more than one. */
+async function loadModels() {
+  const [providers, settings] = await Promise.all([api.providers(), api.settings()]);
+  const option = (provider: string, m: { id: string; label: string }) => new Option(m.label, `${provider}/${m.id}`);
+  modelSelect.replaceChildren(
+    ...providers.flatMap((p) => {
+      const options = p.models.map((m) => option(p.id, m));
+      if (providers.length === 1) return options;
+      const group = document.createElement("optgroup");
+      group.label = p.label;
+      group.append(...options);
+      return [group];
+    }),
+  );
+  modelSelect.value = `${settings.provider}/${settings.model}`;
+  if (modelSelect.selectedIndex < 0) modelSelect.selectedIndex = 0;
+}
+void loadModels();
 void showRecents();
