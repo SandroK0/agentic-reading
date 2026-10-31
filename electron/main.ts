@@ -10,7 +10,18 @@ import { Store } from "./store";
 import { WIDGET_CSP, widgetPage } from "./widget";
 
 // Keep self-test runs from touching the real library and history.
-if (process.env.VR_SELFTEST) app.setPath("userData", path.join(app.getPath("temp"), "visual-reader-selftest"));
+if (process.env.VR_SELFTEST) app.setPath("userData", path.join(app.getPath("temp"), "agentic-reading-selftest"));
+
+// The app used to be called Visual Reader. Copy its data (library, explanations,
+// sidebar settings) over the first time, and leave the old folder as a backup.
+const legacyData = path.join(app.getPath("appData"), "Visual Reader");
+if (
+  !process.env.VR_SELFTEST &&
+  !fs.existsSync(path.join(app.getPath("userData"), "state.json")) &&
+  fs.existsSync(path.join(legacyData, "state.json"))
+) {
+  fs.cpSync(legacyData, app.getPath("userData"), { recursive: true });
+}
 
 const RENDERER_DIR = path.join(__dirname, "..", "renderer");
 const store = new Store(path.join(app.getPath("userData"), "state.json"));
@@ -54,7 +65,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: "Visual Reader",
+    title: "Agentic Reading",
     backgroundColor: "#f6f5f1",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

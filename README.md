@@ -1,4 +1,4 @@
-# Visual Reader
+# Agentic Reading
 
 A desktop PDF reader that explains any passage. Select text, then choose **Explain** for a short written explanation or **Explain visually** for a drawing (a labelled diagram, flow or small chart) that appears next to the page.
 

@@ -76,7 +76,7 @@ async function openBook(path: string) {
   book = { path, title: metaTitle && metaTitle.length > 3 ? metaTitle : fileName, doc };
 
   titleEl.textContent = book.title;
-  document.title = `${book.title} — Visual Reader`;
+  document.title = `${book.title} — Agentic Reading`;
   pageTotal.textContent = `/ ${doc.numPages}`;
   pageInput.max = String(doc.numPages);
   nav.hidden = false;

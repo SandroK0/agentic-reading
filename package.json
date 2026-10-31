@@ -1,6 +1,6 @@
 {
-  "name": "visual-reader",
-  "productName": "Visual Reader",
+  "name": "agentic-reading",
+  "productName": "Agentic Reading",
   "version": "0.1.0",
   "private": true,
   "description": "A PDF reader that explains any passage visually, using your Claude subscription through the Claude Code CLI",
