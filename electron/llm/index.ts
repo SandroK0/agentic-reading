@@ -1,3 +1,4 @@
+import type { Settings } from "../../shared/types";
 import { ClaudeCliProvider } from "./claude-cli";
 import type { LlmProvider } from "./provider";
 
@@ -10,4 +11,11 @@ export type { ChatMessage, LlmProvider, ModelOption } from "./provider";
  */
 export function createProviders(opts: { workDir: string }): LlmProvider[] {
   return [new ClaudeCliProvider(opts.workDir)];
+}
+
+/** The provider and model the settings ask for, falling back to defaults when a setting no longer exists. */
+export function pickModel(providers: LlmProvider[], settings: Settings): { provider: LlmProvider; model: string } {
+  const provider = providers.find((p) => p.id === settings.provider) ?? providers[0];
+  const model = provider.models.some((m) => m.id === settings.model) ? settings.model : provider.defaultModel;
+  return { provider, model };
 }

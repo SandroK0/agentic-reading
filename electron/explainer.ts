@@ -1,5 +1,5 @@
 import type { ChatMessage, ExplainEvent, ExplainRequest, Explanation, ProviderInfo, Settings } from "../shared/types";
-import type { LlmProvider } from "./llm";
+import { pickModel, type LlmProvider } from "./llm";
 import { parseReply, systemPrompt, userPrompt } from "./prompt";
 
 /**
@@ -16,15 +16,8 @@ export class Explainer {
     return this.providers.map(({ id, label, models }) => ({ id, label, models }));
   }
 
-  /** The provider and model to use, falling back to defaults when a setting no longer exists. */
-  private pick(settings: Settings): { provider: LlmProvider; model: string } {
-    const provider = this.providers.find((p) => p.id === settings.provider) ?? this.providers[0];
-    const model = provider.models.some((m) => m.id === settings.model) ? settings.model : provider.defaultModel;
-    return { provider, model };
-  }
-
   async explain(req: ExplainRequest, settings: Settings, parent: Explanation | undefined, emit: (e: ExplainEvent) => void) {
-    const { provider, model } = this.pick(settings);
+    const { provider, model } = pickModel(this.providers, settings);
     const messages: ChatMessage[] = [...(parent?.conversation ?? []), { role: "user", content: userPrompt(req) }];
     // A resume handle only means something to the provider that issued it.
     const resume = parent && (parent.provider ?? "claude-cli") === provider.id ? (parent.resume ?? parent.sessionId) : undefined;

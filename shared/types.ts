@@ -71,6 +71,33 @@ export interface Explanation {
 export interface BookState {
   page: number;
   explanations: Explanation[];
+  /** A table of contents written by the model, for PDFs that don't have one. */
+  generatedContents?: GeneratedContents;
+}
+
+/** One line of a table of contents. `level` 1 is a chapter, 2 a section, 3 a subsection. */
+export interface ContentsEntry {
+  title: string;
+  /** 1-based PDF page. */
+  page: number;
+  level: number;
+}
+
+export interface GeneratedContents {
+  entries: ContentsEntry[];
+  provider: string;
+  model: string;
+  createdAt: number;
+}
+
+/** What the model reads to build a table of contents, gathered from the PDF in the renderer. */
+export interface ContentsSource {
+  bookTitle: string;
+  pageCount: number;
+  /** Full text of the first pages, where a printed table of contents usually is. */
+  frontPages: { page: number; text: string }[];
+  /** Lines that look like headings, with their size relative to the body text. */
+  headings: { page: number; size: number; text: string }[];
 }
 
 export interface Settings {
@@ -90,6 +117,10 @@ export interface ReaderApi {
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<void>;
   providers(): Promise<ProviderInfo[]>;
+  /** Builds and saves a table of contents for a book; rejects with a readable message. */
+  generateContents(bookPath: string, source: ContentsSource): Promise<GeneratedContents>;
+  cancelContents(bookPath: string): Promise<void>;
+  removeContents(bookPath: string): Promise<void>;
   explain(request: ExplainRequest): Promise<void>;
   cancel(id: string): Promise<void>;
   onExplainEvent(listener: (event: ExplainEvent) => void): void;

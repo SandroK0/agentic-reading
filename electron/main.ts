@@ -2,7 +2,8 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from 
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ExplainEvent, ExplainRequest, Explanation, Settings } from "../shared/types";
+import type { ContentsSource, ExplainEvent, ExplainRequest, Explanation, Settings } from "../shared/types";
+import { ContentsGenerator } from "./contents";
 import { Explainer } from "./explainer";
 import { createProviders } from "./llm";
 import { runSelfTest } from "./selftest";
@@ -25,7 +26,9 @@ if (
 
 const RENDERER_DIR = path.join(__dirname, "..", "renderer");
 const store = new Store(path.join(app.getPath("userData"), "state.json"));
-const explainer = new Explainer(createProviders({ workDir: path.join(app.getPath("userData"), "claude-workdir") }));
+const providers = createProviders({ workDir: path.join(app.getPath("userData"), "claude-workdir") });
+const explainer = new Explainer(providers);
+const contentsGenerator = new ContentsGenerator(providers);
 
 /** Widget HTML by explanation id, served at widget://w/<id>. */
 const widgets = new Map<string, string>();
@@ -193,6 +196,15 @@ function registerIpc() {
   });
   ipcMain.handle("explain:cancel", (_e, id: string) => explainer.cancel(id));
   ipcMain.handle("llm:providers", () => explainer.catalog());
+
+  ipcMain.handle("contents:generate", async (_e, bookPath: string, source: ContentsSource) => {
+    const file = assertPdf(bookPath);
+    const contents = await contentsGenerator.generate(file, source, store.settings());
+    store.saveGeneratedContents(file, contents);
+    return contents;
+  });
+  ipcMain.handle("contents:cancel", (_e, bookPath: string) => contentsGenerator.cancel(assertPdf(bookPath)));
+  ipcMain.handle("contents:remove", (_e, bookPath: string) => store.saveGeneratedContents(assertPdf(bookPath), null));
 }
 
 // macOS "Open with" / dropping a PDF on the Dock icon.
@@ -214,4 +226,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-app.on("before-quit", () => explainer.cancelAll());
+app.on("before-quit", () => {
+  explainer.cancelAll();
+  contentsGenerator.cancelAll();
+});

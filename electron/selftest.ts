@@ -12,6 +12,7 @@ import path from "node:path";
  * VR_SELFTEST_FOLLOWUP=1 also asks a follow-up on the new card.
  * VR_SELFTEST_QUESTION="…" types a question into the selection menu first.
  * VR_SELFTEST_THEMES=1 screenshots every theme in light and dark.
+ * VR_SELFTEST_GENERATE_TOC=1 generates contents for a PDF without an outline (or loads saved ones).
  */
 export async function runSelfTest(win: BrowserWindow, open: (p: string) => void, quit: (code: number) => void) {
   const pdf = process.env.VR_SELFTEST!;
@@ -37,6 +38,39 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
   try {
     open(pdf);
     if (!(await waitFor(`document.getElementById("page-total").textContent !== "/ –"`, 30_000))) throw new Error("book never opened");
+
+    // For a PDF without an outline: generate contents with the model (or find saved ones), then jump through them.
+    if (process.env.VR_SELFTEST_GENERATE_TOC) {
+      await waitFor(`!!document.querySelector(".toc-offer button.primary, .toc-generated")`, 30_000);
+      const saved = await js<boolean>(`!!document.querySelector(".toc-generated")`);
+      const started = Date.now();
+      if (!saved) {
+        await js(`document.querySelector(".toc-offer button.primary").click()`);
+        await new Promise((r) => setTimeout(r, 3000));
+        await shot("toc-1-progress");
+        console.log(`[selftest] toc progress: ${await js<string>(`document.querySelector(".toc-offer")?.textContent ?? ""`)}`);
+      }
+      const done = await waitFor(`!!document.querySelector(".toc-generated") || !!document.querySelector(".toc-offer .toc-error")`, 600_000);
+      const result = await js<{ error: string | null; entries: number; top: number; first: string[] }>(`({
+        error: document.querySelector(".toc-error")?.textContent ?? null,
+        entries: document.querySelectorAll(".toc-link").length,
+        top: document.querySelectorAll("#toc-body > ul > li").length,
+        first: [...document.querySelectorAll(".toc-link")].slice(0, 12).map((l) => l.textContent),
+      })`);
+      console.log(`[selftest] toc ${saved ? "loaded from save" : "generated"} in ${Math.round((Date.now() - started) / 1000)}s: ${JSON.stringify(result)}`);
+      const jump = await js<{ title: string; target: string } | null>(`(() => {
+        const links = [...document.querySelectorAll(".toc-link")].filter((l) => !l.disabled);
+        const link = links[Math.floor(links.length / 2)];
+        if (!link) return null;
+        link.click();
+        return { title: link.textContent, target: link.querySelector(".toc-page").textContent };
+      })()`);
+      await new Promise((r) => setTimeout(r, 1500));
+      const landed = await js<string>(`document.getElementById("page-input").value`);
+      console.log(`[selftest] toc jump: ${JSON.stringify({ ...jump, landed })}`);
+      await shot("toc-2-generated");
+      return quit(done && !result.error && result.entries > 0 && jump?.target === landed ? 0 : 1);
+    }
     await js(`(() => { const i = document.getElementById("page-input"); i.value = "${page}"; i.dispatchEvent(new Event("change")); })()`);
     await waitFor(`document.getElementById("page-input").value === "${page}" && !!document.querySelector('.page[data-page=\"${page}\"] .textLayer span')`, 15_000);
     await new Promise((r) => setTimeout(r, 1000));

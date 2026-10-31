@@ -6,6 +6,7 @@ import { allThemesCss, themeById, THEMES } from "../shared/themes";
 import { renderProse } from "./prose";
 import { resizableSidebar } from "./resize";
 import { enableTextSelection } from "./selection";
+import { collectContentsSource } from "./contents-source";
 import { Contents } from "./toc";
 import "./style.css";
 
@@ -43,7 +44,27 @@ const emptyEl = $("empty");
 const recentsEl = $("recents");
 const tocEl = $("toc");
 const tocBtn = $<HTMLButtonElement>("toc-btn");
-const contents = new Contents($("toc-body"), (page) => pages.goTo(page));
+const contents = new Contents($("toc-body"), (page) => pages.goTo(page), {
+  async generate(onProgress, signal) {
+    const current = book!;
+    const total = current.doc.numPages;
+    onProgress(`Reading page 1 of ${total}…`);
+    const source = await collectContentsSource(current.doc, current.title, (n) => onProgress(`Reading page ${n} of ${total}…`), signal);
+    onProgress("Writing the contents. This can take a minute…");
+    signal.addEventListener("abort", () => void api.cancelContents(current.path), { once: true });
+    try {
+      return (await api.generateContents(current.path, source)).entries;
+    } catch (err) {
+      throw new Error(ipcMessage(err));
+    }
+  },
+  remove: () => api.removeContents(book!.path),
+});
+
+/** The message of an error thrown in the main process, without Electron's "Error invoking remote method" wrapper. */
+function ipcMessage(err: unknown): string {
+  return String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, "");
+}
 const pages = new Pages(viewer, pagesEl, showPage);
 enableTextSelection(viewer);
 
@@ -88,9 +109,9 @@ async function openBook(path: string) {
   explainPageBtn.disabled = false;
   tocBtn.hidden = false;
   setTocVisible(tocPreference());
-  void contents.load(doc);
 
   const state = await api.bookState(path);
+  void contents.load(doc, state.generatedContents?.entries);
   renderCards(state.explanations);
   await pages.load(doc, state.page);
 }
