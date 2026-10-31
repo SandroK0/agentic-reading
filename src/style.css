@@ -72,9 +72,41 @@ input, select { padding: 0 8px; }
 
 #toc-btn[aria-pressed="true"] { background: var(--surface); }
 
+/* A thin strip on a sidebar's inner edge; the hit area is wider than the line it shows. */
+.resizer {
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
+  width: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+.resizer::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.resizer:hover::after, .resizer:focus-visible::after, body.resizing .resizer:active::after { opacity: 1; }
+.resizer:focus-visible { outline: none; }
+.toc[hidden] + .resizer { display: none; }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe { pointer-events: none; }
+
 .toc {
   width: 280px;
   flex-shrink: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   border-right: 0.5px solid var(--border);
@@ -185,6 +217,7 @@ input, select { padding: 0 8px; }
 
 .panel {
   width: var(--panel-width);
+  min-width: 0;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;

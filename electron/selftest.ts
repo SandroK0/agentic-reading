@@ -72,6 +72,35 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     })`);
     console.log("[selftest] scroll:", JSON.stringify({ ...scrolled, ...afterScroll }));
     await shot("1c-scrolled");
+
+    // Drag both sidebar handles with the mouse; the page should re-fit to the new width.
+    const sidebarDrag = async (handle: string, dx: number) => {
+      const at = await js<[number, number]>(`(() => { const r = document.getElementById("${handle}").getBoundingClientRect(); return [r.left, r.top + 200]; })()`);
+      const send = (type: "mouseDown" | "mouseMove" | "mouseUp", x: number) =>
+        win.webContents.sendInputEvent({ type, x: Math.round(x), y: Math.round(at[1]), button: "left", clickCount: 1, modifiers: type === "mouseMove" ? ["leftbuttondown"] : [] });
+      send("mouseDown", at[0]);
+      for (let i = 1; i <= 10; i++) {
+        send("mouseMove", at[0] + (dx * i) / 10);
+        await new Promise((r) => setTimeout(r, 16));
+      }
+      send("mouseUp", at[0] + dx);
+    };
+    const widths = () =>
+      js<{ toc: number; panel: number; page: number }>(`({
+        toc: document.getElementById("toc").offsetWidth,
+        panel: document.getElementById("panel").offsetWidth,
+        page: document.querySelector('.page[data-page="' + document.getElementById("page-input").value + '"]').offsetWidth,
+      })`);
+    const before = await widths();
+    await sidebarDrag("toc-resizer", 60);
+    await sidebarDrag("panel-resizer", -100);
+    await new Promise((r) => setTimeout(r, 800));
+    const after = await widths();
+    const resizeOk = after.toc - before.toc === 60 && after.panel - before.panel === 100 && after.page < before.page;
+    console.log(`[selftest] resize sidebars: ok=${resizeOk} ${JSON.stringify({ before, after })}`);
+    await shot("1d-resized");
+    await js(`(() => { for (const id of ["toc-resizer", "panel-resizer"]) document.getElementById(id).dispatchEvent(new MouseEvent("dblclick", { bubbles: true })); })()`);
+    await new Promise((r) => setTimeout(r, 500));
     await js(`(() => { const i = document.getElementById("page-input"); i.value = "${page}"; i.dispatchEvent(new Event("change")); })()`);
     await waitFor(`document.getElementById("page-input").value === "${page}" && !!document.querySelector('.page[data-page=\"${page}\"] .textLayer span')`, 15_000);
 
@@ -187,7 +216,7 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     if (process.env.VR_SELFTEST_NO_EXPLAIN) {
       const floating = await js<boolean>(`!document.getElementById("selection-menu").hidden`);
       console.log(`[selftest] selection menu shown: ${floating}`);
-      return quit(toc.entries > 0 && jumped.clicked && floating && !dragOk.includes(false) ? 0 : 1);
+      return quit(toc.entries > 0 && jumped.clicked && floating && resizeOk && !dragOk.includes(false) ? 0 : 1);
     }
 
     const mode = process.env.VR_SELFTEST_MODE === "text" ? "text" : "visual";

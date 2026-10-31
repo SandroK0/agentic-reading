@@ -3,6 +3,7 @@ import "pdfjs-dist/web/pdf_viewer.css";
 import type { ExplainEvent, ExplainMode, ExplainRequest, Explanation, ModelChoice, ReaderApi } from "../shared/types";
 import { Pages } from "./pages";
 import { renderProse } from "./prose";
+import { resizableSidebar } from "./resize";
 import { enableTextSelection } from "./selection";
 import { Contents } from "./toc";
 import "./style.css";
@@ -472,11 +473,31 @@ viewer.addEventListener("drop", (e) => {
   if (file && file.name.toLowerCase().endsWith(".pdf")) void openBook(api.pathForFile(file));
 });
 
+resizableSidebar(tocEl, $("toc-resizer"), {
+  side: "left",
+  min: 180,
+  initial: 280,
+  storageKey: "visual-reader:toc-width",
+  other: () => $("panel"),
+});
+resizableSidebar($("panel"), $("panel-resizer"), {
+  side: "right",
+  min: 300,
+  initial: 460,
+  storageKey: "visual-reader:panel-width",
+  other: () => tocEl,
+});
+
+// Re-fit pages once the viewer's width settles, not on every frame of a sidebar drag.
 let lastWidth = 0;
+let relayoutTimer: ReturnType<typeof setTimeout> | undefined;
 new ResizeObserver(() => {
   if (Math.abs(viewer.clientWidth - lastWidth) < 4) return;
-  lastWidth = viewer.clientWidth;
-  if (book) pages.relayout();
+  clearTimeout(relayoutTimer);
+  relayoutTimer = setTimeout(() => {
+    lastWidth = viewer.clientWidth;
+    if (book) pages.relayout();
+  }, 120);
 }).observe(viewer);
 
 void api.settings().then((s) => {
