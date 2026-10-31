@@ -7,7 +7,8 @@ import path from "node:path";
  *   VR_SELFTEST=<pdf> [VR_SELFTEST_PAGE=n] [VR_SELFTEST_OUT=dir] npx electron .
  * Opens the book, checks the contents sidebar, selects the first few lines of
  * the page, clicks "Explain visually", waits for the explainer, saves
- * screenshots and quits. VR_SELFTEST_NO_EXPLAIN=1 stops before calling Claude.
+ * screenshots and quits. VR_SELFTEST_NO_EXPLAIN=1 stops before calling Claude;
+ * VR_SELFTEST_MODE=text uses Explain instead of Explain visually.
  */
 export async function runSelfTest(win: BrowserWindow, open: (p: string) => void, quit: (code: number) => void) {
   const pdf = process.env.VR_SELFTEST!;
@@ -74,20 +75,6 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     await js(`(() => { const i = document.getElementById("page-input"); i.value = "${page}"; i.dispatchEvent(new Event("change")); })()`);
     await waitFor(`document.getElementById("page-input").value === "${page}" && !!document.querySelector('.page[data-page=\"${page}\"] .textLayer span')`, 15_000);
 
-    const selected = await js<string>(`(() => {
-      const spans = [...document.querySelectorAll('.page[data-page=\"${page}\"] .textLayer span')].filter((s) => s.textContent.trim().length > 20);
-      const first = spans[1] ?? spans[0], last = spans[Math.min(spans.length - 1, 6)];
-      const r = document.createRange();
-      r.setStart(first.firstChild, 0);
-      r.setEnd(last.firstChild, last.textContent.length);
-      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
-      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-      return sel.toString();
-    })()`);
-    console.log(`[selftest] selected: ${selected.slice(0, 120).replace(/\s+/g, " ")}…`);
-    await new Promise((r) => setTimeout(r, 300));
-    await shot("2-selection");
-
     // Real mouse drags that end off the text (right margin, gap between lines) must not
     // grab text past the line the pointer is on.
     const drag = async (label: string, endAt: "right" | "left" | "bottom") => {
@@ -144,18 +131,74 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
       return ok;
     };
     const dragOk = [await drag("right", "right"), await drag("left", "left"), await drag("bottom", "bottom")];
+
+    // A drag from the end of one page onto the next must still show the menu, on screen.
+    await js(`getSelection().removeAllRanges()`);
+    await js(`(() => { const i = document.getElementById("page-input"); i.value = "${page}"; i.dispatchEvent(new Event("change")); })()`);
+    await new Promise((r) => setTimeout(r, 1000));
+    const across = await js<{ from: [number, number]; to: [number, number] } | null>(`(() => {
+      const leaves = (n) => [...document.querySelectorAll('.page[data-page="' + n + '"] .textLayer span')]
+        .filter((s) => s.textContent.trim().length > 10 && !s.querySelector("span"));
+      const a = leaves(${page}).pop(), b = leaves(${page + 1})[2];
+      if (!a || !b) return null;
+      const v = document.getElementById("viewer");
+      v.scrollTop += a.getBoundingClientRect().top - v.getBoundingClientRect().top - 200;
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      return { from: [ra.left + 2, ra.top + ra.height / 2], to: [rb.right - 2, rb.top + rb.height / 2] };
+    })()`);
+    let acrossOk = false;
+    if (across) {
+      const send = (type: "mouseDown" | "mouseMove" | "mouseUp", [x, y]: [number, number]) =>
+        win.webContents.sendInputEvent({ type, x: Math.round(x), y: Math.round(y), button: "left", clickCount: 1, modifiers: type === "mouseMove" ? ["leftbuttondown"] : [] });
+      send("mouseDown", across.from);
+      for (let i = 1; i <= 12; i++) {
+        send("mouseMove", [across.from[0] + (across.to[0] - across.from[0]) * (i / 12), across.from[1] + (across.to[1] - across.from[1]) * (i / 12)]);
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      send("mouseUp", across.to);
+      await new Promise((r) => setTimeout(r, 300));
+      const menu = await js<{ shown: boolean; onScreen: boolean; chars: number }>(`(() => {
+        const m = document.getElementById("selection-menu"), v = document.getElementById("viewer").getBoundingClientRect();
+        const r = m.getBoundingClientRect();
+        return { shown: !m.hidden, onScreen: r.top >= v.top && r.bottom <= v.bottom, chars: getSelection().toString().length };
+      })()`);
+      acrossOk = menu.shown && menu.onScreen && menu.chars > 20;
+      console.log(`[selftest] drag across pages: ok=${acrossOk} ${JSON.stringify(menu)}`);
+      await shot("2c-drag-across-pages");
+    }
+    dragOk.push(acrossOk);
+    await js(`(() => { const i = document.getElementById("page-input"); i.value = "${page}"; i.dispatchEvent(new Event("change")); })()`);
+    await new Promise((r) => setTimeout(r, 500));
+
+    const selected = await js<string>(`(() => {
+      const spans = [...document.querySelectorAll('.page[data-page=\"${page}\"] .textLayer span')].filter((s) => s.textContent.trim().length > 20);
+      const first = spans[1] ?? spans[0], last = spans[Math.min(spans.length - 1, 6)];
+      const r = document.createRange();
+      r.setStart(first.firstChild, 0);
+      r.setEnd(last.firstChild, last.textContent.length);
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      return sel.toString();
+    })()`);
+    console.log(`[selftest] selected: ${selected.slice(0, 120).replace(/\s+/g, " ")}…`);
+    await new Promise((r) => setTimeout(r, 300));
+    await shot("2-selection");
+
     if (process.env.VR_SELFTEST_NO_EXPLAIN) {
-      const floating = await js<boolean>(`!document.getElementById("explain-float").hidden`);
-      console.log(`[selftest] explain button shown: ${floating}`);
+      const floating = await js<boolean>(`!document.getElementById("selection-menu").hidden`);
+      console.log(`[selftest] selection menu shown: ${floating}`);
       return quit(toc.entries > 0 && jumped.clicked && floating && !dragOk.includes(false) ? 0 : 1);
     }
 
-    await js(`document.getElementById("explain-float").click()`);
+    const mode = process.env.VR_SELFTEST_MODE === "text" ? "text" : "visual";
+    await js(`document.getElementById("explain-${mode}").click()`);
     const started = Date.now();
     await waitFor(`!!document.querySelector(".card .prose p")`, 120_000);
     await shot("3-streaming");
     const done = await waitFor(
-      `!!document.querySelector(".card iframe") || !!document.querySelector(".card .status.error")`,
+      mode === "text"
+        ? `!!document.querySelector(".card .followup:not([hidden])") || !!document.querySelector(".card .status.error")`
+        : `!!document.querySelector(".card iframe") || !!document.querySelector(".card .status.error")`,
       240_000,
     );
     await new Promise((r) => setTimeout(r, 3000));
@@ -166,6 +209,7 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
       prose: document.querySelector(".card .prose")?.textContent ?? "",
       frameHeight: document.querySelector(".card iframe")?.style.height ?? null,
     })`);
+    if (mode === "text") console.log(`[selftest] text explanation: ${result.prose.trim().split(/\s+/).length} words`);
     for (const frame of win.webContents.mainFrame.framesInSubtree) {
       if (!frame.url.startsWith("widget://")) continue;
       const inside = await frame

@@ -1,39 +1,57 @@
-import type { ExplainRequest } from "../shared/types";
+import type { ExplainMode, ExplainRequest } from "../shared/types";
 
 /**
- * System prompt for the explainer. It replaces Claude Code's default prompt,
- * so it has to carry the whole contract: what to output and the design rules
- * that make every widget fit the app.
+ * System prompts, one per explain mode. Each replaces Claude Code's default
+ * prompt, so it has to carry the whole contract: what to output and, for
+ * drawings, the design rules that make them fit the app.
  */
-export const SYSTEM_PROMPT = `You explain passages from books to a reader, visually. The reader selected a passage in their PDF reader; you answer with a short explanation and one interactive HTML widget that shows the idea.
+const TEXT_PROMPT = `You explain passages from books to a reader. The reader selected a passage in their PDF reader and wants to understand it quickly.
+
+# Output format (strict)
+Reply with exactly this and nothing else:
+
+<explanation>
+...
+</explanation>
+
+# The explanation
+- As short as possible: usually 1 to 3 sentences, never more than about 60 words.
+- Plain, everyday language. Say what it means and why it matters; define a term only if the passage hinges on it.
+- Use 2 or 3 short bullet lines starting with "- " only when the passage is a list of steps or parts.
+- No preamble, no restating the passage, no "In summary". Plain text; you may use **bold** and \`code\`.
+- Stay grounded in the passage and its surrounding context.
+- Answer follow-up questions in the same conversation the same way: directly and briefly.`;
+
+const VISUAL_PROMPT = `You explain passages from books to a reader with a drawing. The reader selected a passage in their PDF reader; you answer with a one-line caption and one static diagram that shows the idea at a glance.
 
 # Output format (strict)
 Reply with exactly these two parts and nothing else:
 
 <explanation>
-2 to 5 short sentences, or a few short bullet lines starting with "- ". Plain text; you may use **bold** and \`code\`. Say what the widget lets them try.
+One or two short sentences (under 40 words) saying what the drawing shows. Plain text; you may use **bold** and \`code\`.
 </explanation>
 <widget>
 ...an HTML fragment...
 </widget>
 
-# The widget
-- An HTML fragment: <style>, markup, then <script> last. No <html>, <head> or <body> tags.
-- Make it interactive whenever the idea allows: steppers, sliders, inputs, toggles, small simulations, clickable diagrams. A static diagram is the fallback, not the default.
-- Show the mechanism with the passage's own example values when it has them.
-- Plain HTML, CSS, inline SVG and vanilla JS. You may load libraries only from https://cdnjs.cloudflare.com, https://cdn.jsdelivr.net or https://unpkg.com, with an exact version. Nothing else can load: no fetch, no images from the web.
-- It renders in a sandboxed frame about 420px wide that grows to fit its content. Never use position: fixed or internal scroll areas. Keep it compact.
+# The drawing
+- A static picture, not an app: no <script>, no buttons, inputs, sliders, hover effects or animation. Everything must be visible at once.
+- Mostly inline SVG, with a little HTML and a <style> block if it helps. No <html>, <head> or <body> tags.
+- Pick the form that fits: a labelled diagram, flow or sequence of steps, before/after, timeline, layered stack, memory or table layout, a small chart. Show the mechanism with the passage's own example values when it has them.
+- Keep it simple and readable: a handful of labelled parts, short labels, generous spacing. Don't put paragraphs of text inside it.
+- It renders about 420px wide and grows to fit. Never use position: fixed or internal scroll areas.
 - Inline SVG: use viewBox="0 0 400 H" with width="100%". Keep every label inside the viewBox and clear of lines and other labels.
 - Colors and type come from CSS variables that already handle light and dark mode. Use them, never hard-coded text or background colors:
   --bg, --surface (cards/panels), --text, --text-2 (secondary), --muted, --border, --accent, --accent-bg, --good, --good-bg, --warn, --warn-bg, --bad, --bad-bg, --c1 .. --c4 (categorical fills, with --c1-text .. --c4-text for text on them), --mono, --radius.
-- Buttons, inputs, selects and range sliders are already styled; write bare tags.
-- Flat design: no gradients, shadows or emoji. Sentence case. Font sizes 12px or more.
-- A global ask(question) function sends a follow-up question back to you; use it for an optional "ask about this" button, not for core interactions.
-- Keep the code under about 250 lines. Round every number you display.
+- Flat design: no gradients, shadows or emoji. Sentence case. Font sizes 12px or more. Round every number you display.
 
 # Content
 - Stay grounded in the passage and its surrounding context. Explain what it says; don't drift into the rest of the book.
-- For follow-up questions in the same conversation, answer the question with a fresh explanation and widget (same format).`;
+- For follow-up questions in the same conversation, answer with a fresh caption and drawing (same format).`;
+
+export function systemPrompt(mode: ExplainMode): string {
+  return mode === "text" ? TEXT_PROMPT : VISUAL_PROMPT;
+}
 
 export function userPrompt(req: ExplainRequest): string {
   if (req.question) {
@@ -53,10 +71,12 @@ export function userPrompt(req: ExplainRequest): string {
   ].join("\n");
 }
 
-/** Splits a finished reply into its two parts, tolerating small format slips. */
-export function parseReply(text: string): { prose: string; html: string } {
+/** Splits a finished reply into its parts, tolerating small format slips. */
+export function parseReply(text: string, mode: ExplainMode): { prose: string; html: string } {
   const prose = /<explanation>([\s\S]*?)(<\/explanation>|<widget>|$)/.exec(text)?.[1]?.trim() ?? "";
-  let html = /<widget>([\s\S]*?)(<\/widget>|$)/.exec(text)?.[1]?.trim() ?? "";
+  let html = mode === "text" ? "" : (/<widget>([\s\S]*?)(<\/widget>|$)/.exec(text)?.[1]?.trim() ?? "");
   html = html.replace(/^```(?:html)?\s*/i, "").replace(/```\s*$/, "");
+  // Drawings are static; drop any script that slipped in.
+  html = html.replace(/<script[\s\S]*?(<\/script>|$)/gi, "");
   return { prose: prose || (html ? "" : text.trim()), html };
 }

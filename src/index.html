@@ -39,11 +39,21 @@
     <section class="viewer" id="viewer">
       <div class="empty" id="empty">
         <h1>Open a book to start reading</h1>
-        <p class="muted">Drop a PDF here or press ⌘O. Select any passage and click <b>Explain visually</b>.</p>
+        <p class="muted">Drop a PDF here or press ⌘O. Select any passage and choose <b>Explain</b> or <b>Explain visually</b>.</p>
         <div class="recents" id="recents"></div>
       </div>
       <div class="pages" id="pages" hidden></div>
-      <button class="explain-float" id="explain-float" hidden>Explain visually</button>
+      <div class="selection-menu" id="selection-menu" role="toolbar" aria-label="Selected text" hidden>
+        <button id="explain-text" title="Short written explanation (E)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h10M3 12h6" /></svg>
+          Explain
+        </button>
+        <span class="selection-menu-divider" aria-hidden="true"></span>
+        <button id="explain-visual" title="Explain with a drawing (V)">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" /><circle cx="11.25" cy="4.75" r="2.25" /><path d="M2.5 13.5 5 9.5l2.5 4zM9 10.5h4.5M9 13h3" /></svg>
+          Explain visually
+        </button>
+      </div>
     </section>
 
     <aside class="panel">

@@ -137,12 +137,50 @@ input, select { padding: 0 8px; }
 .recents { display: flex; flex-direction: column; gap: 6px; margin-top: 24px; text-align: left; }
 .recents button { text-align: left; height: auto; padding: 8px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.explain-float {
+.selection-menu {
   position: absolute;
   z-index: 10;
-  background: var(--accent);
-  color: var(--on-accent);
-  border-color: transparent;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.selection-menu button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.selection-menu button:hover { background: var(--surface); }
+.selection-menu #explain-visual { background: var(--accent); color: var(--on-accent); }
+.selection-menu #explain-visual:hover { background: var(--accent); filter: brightness(1.08); }
+.selection-menu svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.selection-menu-divider { width: 0.5px; height: 18px; margin: 0 2px; background: var(--border); }
+@media (prefers-color-scheme: dark) {
+  .selection-menu { background: var(--surface); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); }
+  .selection-menu button:hover { background: rgba(255, 255, 255, 0.08); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .selection-menu:not([hidden]) { animation: menu-in 120ms ease-out; }
+  @keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } }
 }
 
 .panel {
@@ -164,7 +202,7 @@ input, select { padding: 0 8px; }
 .cards { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 .hint { text-align: center; margin-top: 40px; }
 
-.card { border: 0.5px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
+.card { flex-shrink: 0; border: 0.5px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); }
 .card-head { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px 0; }
 .page-link { height: 24px; padding: 0 8px; font-size: 12px; flex-shrink: 0; }
 .quote { flex: 1; min-width: 0; font-size: 13px; color: var(--text-2); font-style: italic; }

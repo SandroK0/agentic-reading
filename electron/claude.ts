@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ExplainEvent, ExplainRequest } from "../shared/types";
-import { SYSTEM_PROMPT, parseReply, userPrompt } from "./prompt";
+import { parseReply, systemPrompt, userPrompt } from "./prompt";
 
 /**
  * Runs explainers through the Claude Code CLI in headless mode, so they use
@@ -58,7 +58,7 @@ export async function explain(
     "--output-format", "stream-json",
     "--verbose",
     "--include-partial-messages",
-    "--system-prompt", SYSTEM_PROMPT,
+    "--system-prompt", systemPrompt(req.mode),
     "--model", req.model,
     // A plain text-in, text-out call: no tools, no user/project settings, no MCP servers.
     "--tools", "",
@@ -119,7 +119,7 @@ export async function explain(
       const detail = resultError || stderr.trim().split("\n").slice(-3).join(" ") || `claude exited with code ${code}`;
       return emit({ id: req.id, type: "error", message: detail });
     }
-    const { prose, html } = parseReply(text);
+    const { prose, html } = parseReply(text, req.mode);
     emit({ id: req.id, type: "done", prose, html, sessionId });
   });
   child.on("error", (err) => {

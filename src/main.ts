@@ -1,6 +1,6 @@
 import * as pdfjsLib from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
-import type { ExplainEvent, ExplainRequest, Explanation, ModelChoice, ReaderApi } from "../shared/types";
+import type { ExplainEvent, ExplainMode, ExplainRequest, Explanation, ModelChoice, ReaderApi } from "../shared/types";
 import { Pages } from "./pages";
 import { renderProse } from "./prose";
 import { enableTextSelection } from "./selection";
@@ -30,7 +30,7 @@ const prevBtn = $<HTMLButtonElement>("prev");
 const nextBtn = $<HTMLButtonElement>("next");
 const zoomLabel = $("zoom-label");
 const modelSelect = $<HTMLSelectElement>("model");
-const explainFloat = $<HTMLButtonElement>("explain-float");
+const selectionMenu = $("selection-menu");
 const explainPageBtn = $<HTMLButtonElement>("explain-page");
 const cardsEl = $("cards");
 const cardsEmpty = $("cards-empty");
@@ -152,7 +152,7 @@ tocBtn.onclick = () => setTocVisible(tocEl.hidden);
 
 // ---------- Selection ----------
 
-function selectedPassage(): { text: string; page: number; rect: DOMRect } | null {
+function selectedPassage(): { text: string; page: number; rect: DOMRect; upward: boolean } | null {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
   const anchor = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement;
@@ -160,20 +160,51 @@ function selectedPassage(): { text: string; page: number; rect: DOMRect } | null
   if (!pageEl || !pagesEl.contains(pageEl)) return null;
   const text = sel.toString().replace(/\s+/g, " ").trim();
   if (text.length < 2) return null;
-  return { text, page: Number(pageEl.dataset.page), rect: sel.getRangeAt(0).getBoundingClientRect() };
+  return { text, page: Number(pageEl.dataset.page), ...selectionEnd(sel) };
 }
 
-function showFloat(rect: DOMRect) {
+/**
+ * Where the selection ends, as the line box of its moving end. The range's own
+ * bounding box is no use once a selection crosses pages: it takes in the next
+ * page's whole canvas, so its bottom can be far off screen.
+ */
+function selectionEnd(sel: Selection): { rect: DOMRect; upward: boolean } {
+  const { anchorNode, anchorOffset, focusNode, focusOffset } = sel;
+  const upward =
+    anchorNode === focusNode
+      ? focusOffset < anchorOffset
+      : !!(anchorNode && focusNode && anchorNode.compareDocumentPosition(focusNode) & Node.DOCUMENT_POSITION_PRECEDING);
+  const caret = document.createRange();
+  if (focusNode) caret.setStart(focusNode, focusOffset);
+  const rects = caret.getClientRects();
+  const rect = rects.length ? rects[0] : (focusNode?.parentElement ?? viewer).getBoundingClientRect();
+  return { rect, upward };
+}
+
+/** Shows the menu just below where the selection ends, or above it when you dragged upwards. */
+function showMenu(rect: DOMRect, upward: boolean) {
   const box = viewer.getBoundingClientRect();
-  explainFloat.hidden = false;
-  const w = explainFloat.offsetWidth;
-  const left = Math.min(Math.max(8, rect.left - box.left + rect.width / 2 - w / 2), box.width - w - 8);
-  explainFloat.style.left = `${left + viewer.scrollLeft}px`;
-  explainFloat.style.top = `${rect.bottom - box.top + viewer.scrollTop + 8}px`;
+  selectionMenu.hidden = false;
+  const w = selectionMenu.offsetWidth;
+  const h = selectionMenu.offsetHeight;
+  const left = Math.min(Math.max(8, rect.left - box.left - w / 2), box.width - w - 8);
+  let top = upward ? rect.top - box.top - h - 8 : rect.bottom - box.top + 8;
+  // Keep it inside the visible part of the viewer.
+  top = Math.min(Math.max(8, top), viewer.clientHeight - h - 8);
+  selectionMenu.style.left = `${left + viewer.scrollLeft}px`;
+  selectionMenu.style.top = `${top + viewer.scrollTop}px`;
 }
 
-function hideFloat() {
-  explainFloat.hidden = true;
+function hideMenu() {
+  selectionMenu.hidden = true;
+}
+
+function explainSelection(mode: ExplainMode) {
+  const sel = selectedPassage();
+  if (!sel) return;
+  hideMenu();
+  window.getSelection()?.removeAllRanges();
+  void explainPassage(sel.page, sel.text, mode);
 }
 
 async function surrounding(page: number, passage: string): Promise<string> {
@@ -317,13 +348,14 @@ function start(card: Card, req: Omit<ExplainRequest, "id" | "model">) {
   void api.explain({ ...req, id: card.data.id, model });
 }
 
-async function explainPassage(page: number, passage: string) {
+async function explainPassage(page: number, passage: string, mode: ExplainMode) {
   if (!book) return;
   const current = book;
   const context = passage ? await surrounding(page, passage) : (await pages.text(page)).slice(0, PAGE_CONTEXT_CHARS);
   if (book !== current) return;
-  const card = makeCard({ id: newId(), page, passage }, current.path);
+  const card = makeCard({ id: newId(), page, passage, mode }, current.path);
   start(card, {
+    mode,
     bookPath: current.path,
     bookTitle: current.title,
     page,
@@ -335,8 +367,10 @@ async function explainPassage(page: number, passage: string) {
 
 function askFollowup(parent: Card, question: string) {
   if (!book || !parent.data.sessionId) return;
-  const card = makeCard({ id: newId(), page: parent.data.page, passage: parent.data.passage, question }, book.path);
+  const mode = parent.data.mode ?? "visual";
+  const card = makeCard({ id: newId(), page: parent.data.page, passage: parent.data.passage, question, mode }, book.path);
   start(card, {
+    mode,
     bookPath: book.path,
     bookTitle: book.title,
     page: parent.data.page,
@@ -355,7 +389,7 @@ api.onExplainEvent((event: ExplainEvent) => {
     const prose = /<explanation>([\s\S]*?)(<\/explanation>|$)/.exec(event.text)?.[1] ?? "";
     card.prose.innerHTML = renderProse(prose);
     const drawing = event.text.includes("<widget>");
-    setStatus(card, drawing ? "Drawing the visual" : "Writing", { thinking: true, stop: true });
+    setStatus(card, drawing ? "Drawing" : "Writing", { thinking: true, stop: true });
   } else if (event.type === "error") {
     setStatus(card, event.message, { error: true });
   } else {
@@ -398,22 +432,18 @@ modelSelect.onchange = () => {
   void api.saveSettings({ model });
 };
 
-explainFloat.onmousedown = (e) => e.preventDefault();
-explainFloat.onclick = () => {
-  const sel = selectedPassage();
-  if (!sel) return;
-  hideFloat();
-  window.getSelection()?.removeAllRanges();
-  void explainPassage(sel.page, sel.text);
-};
-explainPageBtn.onclick = () => void explainPassage(pages.current, "");
+// Keep the selection alive when a menu button is pressed.
+selectionMenu.onmousedown = (e) => e.preventDefault();
+$("explain-text").onclick = () => explainSelection("text");
+$("explain-visual").onclick = () => explainSelection("visual");
+explainPageBtn.onclick = () => void explainPassage(pages.current, "", "visual");
 
 document.addEventListener("mouseup", (e) => {
-  if (explainFloat.contains(e.target as Node)) return;
+  if (selectionMenu.contains(e.target as Node)) return;
   setTimeout(() => {
     const sel = selectedPassage();
-    if (sel) showFloat(sel.rect);
-    else hideFloat();
+    if (sel) showMenu(sel.rect, sel.upward);
+    else hideMenu();
   });
 });
 
@@ -423,13 +453,10 @@ document.addEventListener("keydown", (e) => {
   if (!book) return;
   if (e.key === "ArrowRight") pages.goTo(pages.current + 1);
   else if (e.key === "ArrowLeft") pages.goTo(pages.current - 1);
-  else if (e.key.toLowerCase() === "e" && !e.metaKey && !e.ctrlKey) {
-    const sel = selectedPassage();
-    if (sel) {
-      hideFloat();
-      window.getSelection()?.removeAllRanges();
-      void explainPassage(sel.page, sel.text);
-    }
+  else if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+    const key = e.key.toLowerCase();
+    if (key === "e") explainSelection("text");
+    else if (key === "v") explainSelection("visual");
   }
 });
 

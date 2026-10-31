@@ -2,6 +2,9 @@
 
 export type ModelChoice = "sonnet" | "opus";
 
+/** "text": a short written explanation. "visual": a brief caption plus a static drawing. */
+export type ExplainMode = "text" | "visual";
+
 export interface ExplainRequest {
   /** Client-generated id that ties streamed events to a card. */
   id: string;
@@ -16,6 +19,7 @@ export interface ExplainRequest {
   /** A follow-up question; when set, `sessionId` continues the earlier chat. */
   question?: string;
   sessionId?: string;
+  mode: ExplainMode;
   model: ModelChoice;
 }
 
@@ -29,6 +33,8 @@ export interface Explanation {
   page: number;
   passage: string;
   question?: string;
+  /** Missing on explainers saved before modes existed; those were visual. */
+  mode?: ExplainMode;
   prose: string;
   html: string;
   sessionId: string;
