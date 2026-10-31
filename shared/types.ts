@@ -142,6 +142,6 @@ export interface ReaderApi {
   /** The OS, e.g. "darwin", for platform-specific layout. */
   platform: string;
   onFullscreen(listener: (fullscreen: boolean) => void): void;
-  /** URL that serves an explainer's HTML inside a sandboxed frame, styled in theme `theme`. */
-  widgetUrl(id: string, theme: string): string;
+  /** URL that serves an explainer's HTML inside a sandboxed frame, in the reader's theme and light/dark palette. */
+  widgetUrl(id: string, theme: string, scheme: "light" | "dark"): string;
 }

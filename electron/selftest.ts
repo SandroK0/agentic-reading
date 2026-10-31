@@ -12,6 +12,8 @@ import path from "node:path";
  * VR_SELFTEST_FOLLOWUP=1 also asks a follow-up on the new card.
  * VR_SELFTEST_QUESTION="…" types a question into the selection menu first.
  * VR_SELFTEST_THEMES=1 screenshots every theme in light and dark.
+ * VR_SELFTEST_SCREENSHOTS=<dir> stages two explanations and saves README screenshots there
+ * (use with VR_SELFTEST_PROFILE=<name> for an empty profile).
  * VR_SELFTEST_GENERATE_TOC=1 generates contents for a PDF without an outline (or loads saved ones).
  */
 export async function runSelfTest(win: BrowserWindow, open: (p: string) => void, quit: (code: number) => void) {
@@ -38,6 +40,74 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
   try {
     open(pdf);
     if (!(await waitFor(`document.getElementById("page-total").textContent !== "/ –"`, 30_000))) throw new Error("book never opened");
+
+    // README screenshots: two real explanations on the page, then the app in a few themes, saved to VR_SELFTEST_SCREENSHOTS.
+    if (process.env.VR_SELFTEST_SCREENSHOTS) {
+      const dir = process.env.VR_SELFTEST_SCREENSHOTS;
+      fs.mkdirSync(dir, { recursive: true });
+      const { nativeTheme } = await import("electron");
+      // Same framing for every shot: the top of the page, the newest card first, drawings fully grown.
+      const frame = async () => {
+        await js(`(() => { const i = document.getElementById("page-input"); i.value = "${page}"; i.dispatchEvent(new Event("change")); })()`);
+        await waitFor(`!!document.querySelector('.page[data-page="${page}"] .textLayer span')`, 15_000);
+        await waitFor(`[...document.querySelectorAll(".card iframe")].every((f) => f.style.height && f.style.height !== "120px")`, 30_000);
+        await js(`document.getElementById("cards").scrollTop = 0`);
+      };
+      const save = async (name: string) => {
+        await new Promise((r) => setTimeout(r, 1200));
+        const image = await win.webContents.capturePage();
+        fs.writeFileSync(path.join(dir, `${name}.png`), image.resize({ width: 1600, quality: "best" }).toPNG());
+        console.log(`[selftest] screenshot ${name}.png`);
+      };
+      const setTheme = (id: string) => js(`(() => { const s = document.getElementById("theme"); s.value = "${id}"; s.dispatchEvent(new Event("change")); })()`);
+      // Selects lines `from`..`to` of the page's longer text spans and opens the selection menu.
+      const select = (from: number, to: number) =>
+        js<string>(`(() => {
+          const spans = [...document.querySelectorAll('.page[data-page="${page}"] .textLayer span')].filter((s) => s.textContent.trim().length > 20);
+          const first = spans[${from}], last = spans[Math.min(spans.length - 1, ${to})];
+          const r = document.createRange();
+          r.setStart(first.firstChild, 0);
+          r.setEnd(last.firstChild, last.textContent.length);
+          const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+          document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+          return sel.toString();
+        })()`);
+      const finished = () => waitFor(`![...document.querySelectorAll(".card .status")].some((s) => !s.hidden && !s.classList.contains("error"))`, 240_000);
+
+      nativeTheme.themeSource = "light";
+      await setTheme("ink");
+      await js(`(() => { const i = document.getElementById("page-input"); i.value = "${page}"; i.dispatchEvent(new Event("change")); })()`);
+      await waitFor(`!!document.querySelector('.page[data-page="${page}"] .textLayer span')`, 15_000);
+
+      await select(1, 6);
+      await js(`document.getElementById("selection-question").value = "Why would you ever change the defaults?"`);
+      await js(`document.getElementById("explain-text").click()`);
+      await new Promise((r) => setTimeout(r, 1000));
+      await finished();
+      await select(14, 19);
+      await js(`document.getElementById("explain-visual").click()`);
+      await new Promise((r) => setTimeout(r, 1000));
+      await finished();
+      await waitFor(`[...document.querySelectorAll(".card iframe")].every((f) => f.style.height && f.style.height !== "120px")`, 30_000);
+      await js(`getSelection().removeAllRanges(); document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }))`);
+      await frame();
+      await save("reader");
+
+      await select(8, 11);
+      await js(`document.getElementById("selection-question").value = "How is this different from fork()?"`);
+      await save("ask");
+      await js(`getSelection().removeAllRanges(); document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }))`);
+
+      nativeTheme.themeSource = "dark";
+      await setTheme("night");
+      await frame();
+      await save("night-library");
+      await setTheme("graphite");
+      await frame();
+      await save("graphite-dark");
+      nativeTheme.themeSource = "system";
+      return quit(0);
+    }
 
     // For a PDF without an outline: generate contents with the model (or find saved ones), then jump through them.
     if (process.env.VR_SELFTEST_GENERATE_TOC) {

@@ -4,16 +4,17 @@ A desktop PDF reader that explains any passage. Select text, then choose **Expla
 
 It uses your Claude subscription through the [Claude Code](https://claude.com/claude-code) CLI you already have signed in. There's no API key and no separate account.
 
-```
-┌──────────────────────────────┬─────────────────────────┐
-│ PDF page                     │ Explanations            │
-│                              │ ┌─────────────────────┐ │
-│  [selected passage]          │ │ p. 300 “The second… │ │
-│  [Explain│Explain visually]  │ │ short explanation   │ │
-│                              │ │ [drawing]           │ │
-│                              │ │ Ask a follow-up…    │ │
-└──────────────────────────────┴─┴─────────────────────┴─┘
-```
+![The reader in the Paper & Ink theme: contents on the left, a page of Operating Systems: Three Easy Pieces, and two explanations on the right, one with a drawing](docs/screenshots/reader.png)
+
+Select a passage to explain it, optionally with your own question:
+
+![The selection menu open over a highlighted passage, with a typed question and the Explain and Explain visually buttons](docs/screenshots/ask.png)
+
+| Night Library | Graphite & Violet (dark) |
+| --- | --- |
+| ![The same view in the Night Library theme](docs/screenshots/night-library.png) | ![The same view in the Graphite & Violet theme, dark mode](docs/screenshots/graphite-dark.png) |
+
+<sub>Book shown: [Operating Systems: Three Easy Pieces](https://pages.cs.wisc.edu/~remzi/OSTEP/) by Remzi and Andrea Arpaci-Dusseau, free online.</sub>
 
 ## Run it
 
@@ -68,6 +69,14 @@ The model menu groups models by provider once there's more than one. Conversatio
 ```bash
 npm run build
 VR_SELFTEST="/path/to/book.pdf" VR_SELFTEST_PAGE=300 npx electron .
+```
+
+To refresh the screenshots above (two real requests, in an empty profile):
+
+```bash
+npm run build
+VR_SELFTEST_PROFILE=agentic-reading-screenshots VR_SELFTEST_SCREENSHOTS="$PWD/docs/screenshots" \
+  VR_SELFTEST="/path/to/ostep.pdf" VR_SELFTEST_PAGE=300 npx electron .
 ```
 
 The self-test opens the book in a throwaway profile, selects part of the page and clicks Explain. It waits for the explainer and saves screenshots to `selftest-out/`, including the widget on its own. It makes one real request through your subscription. Set `VR_DEBUG=1` to log the CLI's events.

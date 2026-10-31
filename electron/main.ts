@@ -11,7 +11,10 @@ import { Store } from "./store";
 import { WIDGET_CSP, widgetPage } from "./widget";
 
 // Keep self-test runs from touching the real library and history.
-if (process.env.VR_SELFTEST) app.setPath("userData", path.join(app.getPath("temp"), "agentic-reading-selftest"));
+// VR_SELFTEST_PROFILE picks another throwaway profile, e.g. an empty one for README screenshots.
+if (process.env.VR_SELFTEST) {
+  app.setPath("userData", path.join(app.getPath("temp"), process.env.VR_SELFTEST_PROFILE ?? "agentic-reading-selftest"));
+}
 
 // The app used to be called Visual Reader. Copy its data (library, explanations,
 // sidebar settings) over the first time, and leave the old folder as a backup.
@@ -63,7 +66,7 @@ function registerProtocols() {
     const id = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
     const html = widgets.get(id);
     if (html === undefined) return new Response("Not found", { status: 404 });
-    return new Response(widgetPage(html, url.searchParams.get("theme")), {
+    return new Response(widgetPage(html, url.searchParams.get("theme"), url.searchParams.get("scheme")), {
       headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": WIDGET_CSP },
     });
   });

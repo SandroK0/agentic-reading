@@ -34,7 +34,8 @@ interface Card {
 export interface CardsOptions {
   api: ReaderApi;
   goTo: (page: number) => void;
-  theme: () => string;
+  /** The reader's theme and the light/dark palette it's showing, which drawings copy. */
+  look: () => { theme: string; scheme: "light" | "dark" };
   /** Called when an explanation starts, so the panel can make sure it's visible. */
   onStart: () => void;
   /** Book details for follow-up requests. */
@@ -139,7 +140,7 @@ export class ExplanationCards {
   /** Re-renders every drawing, e.g. in a new theme. */
   refreshDrawings() {
     for (const card of this.cards.values()) {
-      for (const turn of card.turns) if (turn.frame) turn.frame.src = this.opts.api.widgetUrl(turn.id, this.opts.theme());
+      for (const turn of card.turns) if (turn.frame) turn.frame.src = this.drawingUrl(turn.id);
     }
   }
 
@@ -273,9 +274,14 @@ export class ExplanationCards {
     const frame = document.createElement("iframe");
     frame.setAttribute("sandbox", "allow-scripts");
     frame.title = "Visual explainer";
-    frame.src = this.opts.api.widgetUrl(turn.id, this.opts.theme());
+    frame.src = this.drawingUrl(turn.id);
     turn.el.append(frame);
     turn.frame = frame;
+  }
+
+  private drawingUrl(id: string) {
+    const { theme, scheme } = this.opts.look();
+    return this.opts.api.widgetUrl(id, theme, scheme);
   }
 
   private setCollapsed(card: Card, collapsed: boolean) {

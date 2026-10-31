@@ -186,6 +186,16 @@ function currentTheme(): string {
   return document.documentElement.dataset.theme ?? "ink";
 }
 
+const darkSystem = matchMedia("(prefers-color-scheme: dark)");
+
+/** The palette the reader is showing: dark-only themes are always dark, the rest follow the system. */
+function currentScheme(): "light" | "dark" {
+  return themeById(currentTheme()).darkOnly || darkSystem.matches ? "dark" : "light";
+}
+
+// Drawings are told which palette to use, so redraw them when the system switches between light and dark.
+darkSystem.addEventListener("change", () => explanations.refreshDrawings());
+
 /** Applies a theme to the reader and re-renders open drawings in it. */
 function applyTheme(id: string | null) {
   const theme = themeById(id);
@@ -315,7 +325,7 @@ async function surrounding(page: number, passage: string): Promise<string> {
 const explanations = new ExplanationCards(cardsEl, cardsEmpty, countEl, {
   api,
   goTo: (page) => pages.goTo(page),
-  theme: () => currentTheme(),
+  look: () => ({ theme: currentTheme(), scheme: currentScheme() }),
   // A new explanation shouldn't land in a hidden panel.
   onStart: () => {
     if (panelWindow.place === "hidden") panelWindow.dock();

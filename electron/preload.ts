@@ -28,7 +28,7 @@ const api: ReaderApi = {
   onOpenBook: (listener) => {
     ipcRenderer.on("book:open", (_e, path: string) => listener(path));
   },
-  widgetUrl: (id, theme) => `widget://w/${encodeURIComponent(id)}?theme=${encodeURIComponent(theme)}`,
+  widgetUrl: (id, theme, scheme) => `widget://w/${encodeURIComponent(id)}?theme=${encodeURIComponent(theme)}&scheme=${scheme}`,
 };
 
 contextBridge.exposeInMainWorld("reader", api);

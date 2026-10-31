@@ -148,9 +148,13 @@ function declarations(palette: Palette): string {
     .join(" ");
 }
 
-/** CSS that applies `theme` to `selector`, following the system's light/dark setting unless it's dark-only. */
-export function themeCss(theme: Theme, selector: string): string {
-  if (theme.darkOnly) return `${selector} { color-scheme: dark; ${declarations(theme.dark)} }`;
+/**
+ * CSS that applies `theme` to `selector`. With `scheme`, it's fixed to that palette (drawings get told which
+ * one the reader is showing); without, it follows the system's light/dark setting unless the theme is dark-only.
+ */
+export function themeCss(theme: Theme, selector: string, scheme?: "light" | "dark"): string {
+  if (theme.darkOnly || scheme === "dark") return `${selector} { color-scheme: dark; ${declarations(theme.dark)} }`;
+  if (scheme === "light") return `${selector} { color-scheme: light; ${declarations(theme.light)} }`;
   return [
     `${selector} { color-scheme: light; ${declarations(theme.light)} }`,
     `@media (prefers-color-scheme: dark) { ${selector} { color-scheme: dark; ${declarations(theme.dark)} } }`,

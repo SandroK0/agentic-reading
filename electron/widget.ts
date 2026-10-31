@@ -45,11 +45,11 @@ const BRIDGE = `
 })();
 `;
 
-/** A full widget page for `fragment`, in the app's theme `themeId` so it matches the reader around it. */
-export function widgetPage(fragment: string, themeId: string | null): string {
+/** A full widget page for `fragment`, in the reader's theme and light/dark palette so it matches what's around it. */
+export function widgetPage(fragment: string, themeId: string | null, scheme: string | null): string {
   return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>${themeCss(themeById(themeId), ":root")}
+<style>${themeCss(themeById(themeId), ":root", scheme === "light" || scheme === "dark" ? scheme : undefined)}
 ${BASE_CSS}</style><script>${BRIDGE}</script></head>
 <body>${fragment}</body></html>`;
 }
