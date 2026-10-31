@@ -27,6 +27,14 @@ npm start          # builds, then opens the app
 
 After the first build, `npx electron .` opens it without rebuilding.
 
+### Install as a Mac app
+
+```bash
+npm run dist       # builds release/Agentic Reading-<version>-arm64.dmg
+```
+
+Open the DMG and drag the app to Applications. It shares its library with `npm start`, and still needs the `claude` CLI signed in. The build is signed ad hoc, not notarised: it opens normally on the Mac that built it, but a copy downloaded on another Mac needs `xattr -cr "/Applications/Agentic Reading.app"` before it will open. The icon comes from `build/icon.svg` (`npx electron scripts/make-icon.mjs` re-renders it).
+
 ## Use
 
 - **Open a book:** click Open (⌘O), drop a PDF on the window, or use File → Open recent.

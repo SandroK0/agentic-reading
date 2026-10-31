@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a5ce6"/>
+      <stop offset="1" stop-color="#1f3bb8"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS icon grid: an 824px rounded square inside the 1024px canvas -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <!-- open book -->
+  <path d="M512 372c-62-44-150-62-238-56v360c88-6 176 12 238 56" fill="#ffffff"/>
+  <path d="M512 372c62-44 150-62 238-56v360c-88-6-176 12-238 56" fill="#e7ecff"/>
+  <path d="M512 372v360" stroke="#1f3bb8" stroke-width="10" stroke-linecap="round"/>
+  <g fill="none" stroke="#9aa9e8" stroke-width="14" stroke-linecap="round">
+    <path d="M326 418c50-4 100 6 140 26"/><path d="M326 478c50-4 100 6 140 26"/><path d="M326 538c50-4 100 6 140 26"/>
+    <path d="M558 444c40-20 90-30 140-26"/><path d="M558 504c40-20 90-30 140-26"/>
+  </g>
+  <!-- the spark of an explanation -->
+  <path d="M700 230c10 50 30 70 80 80-50 10-70 30-80 80-10-50-30-70-80-80 50-10 70-30 80-80z" fill="#f0b44c"/>
+</svg>

@@ -10,13 +10,48 @@
     "build:renderer": "tsc --noEmit && vite build && node scripts/copy-pdf-assets.mjs",
     "build:electron": "tsc -p tsconfig.electron.json",
     "start": "npm run build && electron .",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "dist": "npm run build && electron-builder --mac"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "electron": "44.7.0",
+    "electron-builder": "26.17.0",
     "pdfjs-dist": "5.4.530",
     "typescript": "^5.9.3",
     "vite": "^6.0.0"
+  },
+  "build": {
+    "appId": "com.sandrok0.agentic-reading",
+    "productName": "Agentic Reading",
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "mac": {
+      "category": "public.app-category.education",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF document",
+        "role": "Viewer",
+        "rank": "Alternate"
+      }
+    ]
   }
 }
