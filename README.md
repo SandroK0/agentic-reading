@@ -29,7 +29,7 @@ After the first build, `npx electron .` opens it without rebuilding.
 ## Use
 
 - **Open a book:** click Open (⌘O), drop a PDF on the window, or use File → Open recent.
-- **Read:** use ‹ › or the arrow keys to turn pages, and − + to zoom. The app remembers your page in each book.
+- **Read:** scroll through the book continuously, or jump a page with ‹ › or the ← → keys. Use − + to zoom. The app remembers your page in each book.
 - **Explain a passage:** select text, then click **Explain visually** (or press `E`). **Explain this page** does the whole page.
 - **Follow up:** type a question under any explainer, or use an "Ask about this" button inside a widget. Follow-ups continue the same conversation, so Claude remembers the passage.
 - **Pick a model** in the toolbar: Sonnet is faster, Opus gives the best results.

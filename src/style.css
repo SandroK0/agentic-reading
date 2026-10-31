@@ -121,12 +121,16 @@ input, select { padding: 0 8px; }
   background: var(--canvas);
   padding: 24px;
   display: flex;
-  justify-content: center;
   align-items: flex-start;
 }
 .viewer.dragging { outline: 2px dashed var(--accent); outline-offset: -12px; }
-.page { position: relative; background: #fff; box-shadow: 0 0 0 0.5px var(--border); }
-.page canvas { display: block; }
+/* Auto margins rather than justify-content, so a zoomed-in page can still scroll to its left edge. */
+.pages { position: relative; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.page { position: relative; flex-shrink: 0; background: #fff; box-shadow: 0 0 0 0.5px var(--border); }
+.page canvas { display: block; width: 100%; height: 100%; }
+/* Only the text layer is selectable, so dragging through page gaps or margins can't pull in stray text. */
+.pages { user-select: none; }
+.pages .textLayer { user-select: text; }
 
 .empty { margin: auto; text-align: center; max-width: 420px; }
 .empty h1 { font-size: 20px; font-weight: 500; margin: 0 0 8px; }

@@ -1,8 +1,9 @@
 import * as pdfjsLib from "pdfjs-dist";
-import { TextLayer } from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
 import type { ExplainEvent, ExplainRequest, Explanation, ModelChoice, ReaderApi } from "../shared/types";
+import { Pages } from "./pages";
 import { renderProse } from "./prose";
+import { enableTextSelection } from "./selection";
 import { Contents } from "./toc";
 import "./style.css";
 
@@ -20,9 +21,7 @@ const PAGE_CONTEXT_CHARS = 6000;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const viewer = $("viewer");
-const pageEl = $("page");
-const canvas = $<HTMLCanvasElement>("canvas");
-const textLayerEl = $("text-layer");
+const pagesEl = $("pages");
 const titleEl = $("title");
 const nav = $("nav");
 const pageInput = $<HTMLInputElement>("page-input");
@@ -40,7 +39,9 @@ const emptyEl = $("empty");
 const recentsEl = $("recents");
 const tocEl = $("toc");
 const tocBtn = $<HTMLButtonElement>("toc-btn");
-const contents = new Contents($("toc-body"), (page) => void renderPage(page));
+const contents = new Contents($("toc-body"), (page) => pages.goTo(page));
+const pages = new Pages(viewer, pagesEl, showPage);
+enableTextSelection(viewer);
 
 interface Book {
   path: string;
@@ -49,12 +50,7 @@ interface Book {
 }
 
 let book: Book | null = null;
-let currentPage = 1;
-let zoom = 1;
-let renderSeq = 0;
-let renderTask: pdfjsLib.RenderTask | null = null;
 let model: ModelChoice = "sonnet";
-const pageText = new Map<number, string>();
 
 // ---------- Opening books ----------
 
@@ -78,7 +74,6 @@ async function openBook(path: string) {
   const metaTitle = (meta?.info as { Title?: string } | undefined)?.Title?.trim();
   const fileName = path.split("/").pop()!.replace(/\.pdf$/i, "");
   book = { path, title: metaTitle && metaTitle.length > 3 ? metaTitle : fileName, doc };
-  pageText.clear();
 
   titleEl.textContent = book.title;
   document.title = `${book.title} — Visual Reader`;
@@ -86,7 +81,7 @@ async function openBook(path: string) {
   pageInput.max = String(doc.numPages);
   nav.hidden = false;
   emptyEl.hidden = true;
-  pageEl.hidden = false;
+  pagesEl.hidden = false;
   explainPageBtn.disabled = false;
   tocBtn.hidden = false;
   setTocVisible(tocPreference());
@@ -94,7 +89,7 @@ async function openBook(path: string) {
 
   const state = await api.bookState(path);
   renderCards(state.explanations);
-  await renderPage(state.page);
+  await pages.load(doc, state.page);
 }
 
 async function showRecents() {
@@ -110,60 +105,25 @@ async function showRecents() {
   );
 }
 
-// ---------- Rendering ----------
+// ---------- Page tracking ----------
 
 let savePageTimer: ReturnType<typeof setTimeout> | undefined;
 
-async function renderPage(n: number) {
+/** Called whenever the page you're reading changes, by scrolling or jumping. */
+function showPage(n: number) {
   if (!book) return;
-  const { doc } = book;
-  currentPage = Math.min(Math.max(1, Math.round(n) || 1), doc.numPages);
-  const seq = ++renderSeq;
-  pageInput.value = String(currentPage);
-  contents.setPage(currentPage);
-  prevBtn.disabled = currentPage <= 1;
-  nextBtn.disabled = currentPage >= doc.numPages;
-  zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
-  hideFloat();
+  pageInput.value = String(n);
+  contents.setPage(n);
+  prevBtn.disabled = n <= 1;
+  nextBtn.disabled = n >= book.doc.numPages;
   clearTimeout(savePageTimer);
   const path = book.path;
-  savePageTimer = setTimeout(() => api.savePage(path, currentPage), 400);
+  savePageTimer = setTimeout(() => api.savePage(path, n), 400);
+}
 
-  const page = await doc.getPage(currentPage);
-  if (seq !== renderSeq) return;
-  const base = page.getViewport({ scale: 1 });
-  const fit = Math.max(200, viewer.clientWidth - 48) / base.width;
-  const scale = Math.min(fit, 2.2) * zoom;
-  const viewport = page.getViewport({ scale });
-  const dpr = window.devicePixelRatio || 1;
-
-  renderTask?.cancel();
-  canvas.width = Math.floor(viewport.width * dpr);
-  canvas.height = Math.floor(viewport.height * dpr);
-  canvas.style.width = `${Math.floor(viewport.width)}px`;
-  canvas.style.height = `${Math.floor(viewport.height)}px`;
-  pageEl.style.setProperty("--scale-factor", String(scale));
-  pageEl.style.setProperty("--total-scale-factor", String(scale));
-  renderTask = page.render({ canvas, viewport, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined });
-  try {
-    await renderTask.promise;
-  } catch (err) {
-    if (err instanceof Error && err.name === "RenderingCancelledException") return;
-    throw err;
-  }
-  if (seq !== renderSeq) return;
-
-  const content = await page.getTextContent();
-  if (seq !== renderSeq) return;
-  textLayerEl.replaceChildren();
-  await new TextLayer({ textContentSource: content, container: textLayerEl, viewport }).render();
-  if (!pageText.has(currentPage)) {
-    pageText.set(
-      currentPage,
-      content.items.map((i) => ("str" in i ? i.str + (i.hasEOL ? "\n" : "") : "")).join(""),
-    );
-  }
-  viewer.scrollTop = 0;
+function setZoom(zoom: number) {
+  pages.setZoom(Math.min(3, Math.max(0.5, zoom)));
+  zoomLabel.textContent = `${Math.round(pages.zoomLevel * 100)}%`;
 }
 
 // ---------- Contents sidebar ----------
@@ -192,11 +152,15 @@ tocBtn.onclick = () => setTocVisible(tocEl.hidden);
 
 // ---------- Selection ----------
 
-function selectedPassage(): { text: string; rect: DOMRect } | null {
+function selectedPassage(): { text: string; page: number; rect: DOMRect } | null {
   const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !textLayerEl.contains(sel.anchorNode)) return null;
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const anchor = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement;
+  const pageEl = anchor?.closest<HTMLElement>(".textLayer")?.closest<HTMLElement>(".page");
+  if (!pageEl || !pagesEl.contains(pageEl)) return null;
   const text = sel.toString().replace(/\s+/g, " ").trim();
-  return text.length >= 2 ? { text, rect: sel.getRangeAt(0).getBoundingClientRect() } : null;
+  if (text.length < 2) return null;
+  return { text, page: Number(pageEl.dataset.page), rect: sel.getRangeAt(0).getBoundingClientRect() };
 }
 
 function showFloat(rect: DOMRect) {
@@ -212,8 +176,8 @@ function hideFloat() {
   explainFloat.hidden = true;
 }
 
-function surrounding(passage: string): string {
-  const text = (pageText.get(currentPage) ?? "").replace(/\s+/g, " ");
+async function surrounding(page: number, passage: string): Promise<string> {
+  const text = (await pages.text(page)).replace(/\s+/g, " ");
   const at = text.indexOf(passage.slice(0, 60));
   if (at < 0) return text.slice(0, PASSAGE_CONTEXT_CHARS * 2);
   return text.slice(Math.max(0, at - PASSAGE_CONTEXT_CHARS), at + passage.length + PASSAGE_CONTEXT_CHARS);
@@ -253,7 +217,7 @@ function makeCard(data: Card["data"], bookPath: string): Card {
   pageLink.className = "page-link";
   pageLink.textContent = `p. ${data.page}`;
   pageLink.title = "Go to this page";
-  pageLink.onclick = () => renderPage(data.page);
+  pageLink.onclick = () => pages.goTo(data.page);
   const quote = document.createElement("span");
   quote.className = "quote";
   const label = data.question ?? data.passage;
@@ -353,17 +317,19 @@ function start(card: Card, req: Omit<ExplainRequest, "id" | "model">) {
   void api.explain({ ...req, id: card.data.id, model });
 }
 
-function explainPassage(passage: string) {
+async function explainPassage(page: number, passage: string) {
   if (!book) return;
-  const page = currentPage;
-  const card = makeCard({ id: newId(), page, passage }, book.path);
+  const current = book;
+  const context = passage ? await surrounding(page, passage) : (await pages.text(page)).slice(0, PAGE_CONTEXT_CHARS);
+  if (book !== current) return;
+  const card = makeCard({ id: newId(), page, passage }, current.path);
   start(card, {
-    bookPath: book.path,
-    bookTitle: book.title,
+    bookPath: current.path,
+    bookTitle: current.title,
     page,
-    pageCount: book.doc.numPages,
+    pageCount: current.doc.numPages,
     passage,
-    context: passage ? surrounding(passage) : (pageText.get(page) ?? "").slice(0, PAGE_CONTEXT_CHARS),
+    context,
   });
 }
 
@@ -421,17 +387,11 @@ $("open-btn").onclick = async () => {
 };
 api.onOpenBook((path) => void openBook(path));
 
-prevBtn.onclick = () => renderPage(currentPage - 1);
-nextBtn.onclick = () => renderPage(currentPage + 1);
-pageInput.onchange = () => renderPage(Number(pageInput.value));
-$("zoom-in").onclick = () => {
-  zoom = Math.min(3, zoom + 0.25);
-  void renderPage(currentPage);
-};
-$("zoom-out").onclick = () => {
-  zoom = Math.max(0.5, zoom - 0.25);
-  void renderPage(currentPage);
-};
+prevBtn.onclick = () => pages.goTo(pages.current - 1);
+nextBtn.onclick = () => pages.goTo(pages.current + 1);
+pageInput.onchange = () => pages.goTo(Number(pageInput.value));
+$("zoom-in").onclick = () => setZoom(pages.zoomLevel + 0.25);
+$("zoom-out").onclick = () => setZoom(pages.zoomLevel - 0.25);
 
 modelSelect.onchange = () => {
   model = modelSelect.value as ModelChoice;
@@ -444,9 +404,9 @@ explainFloat.onclick = () => {
   if (!sel) return;
   hideFloat();
   window.getSelection()?.removeAllRanges();
-  explainPassage(sel.text);
+  void explainPassage(sel.page, sel.text);
 };
-explainPageBtn.onclick = () => explainPassage("");
+explainPageBtn.onclick = () => void explainPassage(pages.current, "");
 
 document.addEventListener("mouseup", (e) => {
   if (explainFloat.contains(e.target as Node)) return;
@@ -461,14 +421,14 @@ document.addEventListener("keydown", (e) => {
   const t = e.target as HTMLElement;
   if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
   if (!book) return;
-  if (e.key === "ArrowRight" || e.key === "PageDown") void renderPage(currentPage + 1);
-  else if (e.key === "ArrowLeft" || e.key === "PageUp") void renderPage(currentPage - 1);
+  if (e.key === "ArrowRight") pages.goTo(pages.current + 1);
+  else if (e.key === "ArrowLeft") pages.goTo(pages.current - 1);
   else if (e.key.toLowerCase() === "e" && !e.metaKey && !e.ctrlKey) {
     const sel = selectedPassage();
     if (sel) {
       hideFloat();
       window.getSelection()?.removeAllRanges();
-      explainPassage(sel.text);
+      void explainPassage(sel.page, sel.text);
     }
   }
 });
@@ -489,7 +449,7 @@ let lastWidth = 0;
 new ResizeObserver(() => {
   if (Math.abs(viewer.clientWidth - lastWidth) < 4) return;
   lastWidth = viewer.clientWidth;
-  if (book) void renderPage(currentPage);
+  if (book) pages.relayout();
 }).observe(viewer);
 
 void api.settings().then((s) => {
