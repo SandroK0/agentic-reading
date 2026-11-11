@@ -44,6 +44,8 @@ export class ClaudeCliProvider implements LlmProvider {
   readonly models = [
     { id: "sonnet", label: "Sonnet (faster)" },
     { id: "opus", label: "Opus (best)" },
+    { id: "haiku", label: "Haiku (fastest)" },
+    { id: "claude-fable-5-2", label: "Fable 5.2" },
   ];
   readonly defaultModel = "sonnet";
 
