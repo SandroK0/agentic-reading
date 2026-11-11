@@ -31,6 +31,19 @@ button.primary:hover:not(:disabled) { background: var(--accent); filter: brightn
 input, select { padding: 0 8px; }
 input::placeholder { color: var(--muted); }
 input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Scrollbars: a thin rounded thumb with no track, faint until you point at the area it scrolls. */
+::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--text) 14%, transparent);
+}
+:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--text) 26%, transparent); }
+::-webkit-scrollbar-thumb:hover { border-width: 2px; background-color: color-mix(in srgb, var(--text) 40%, transparent); }
+::-webkit-scrollbar-thumb:active { background-color: color-mix(in srgb, var(--text) 50%, transparent); }
+
 kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 5px; border-radius: 4px; background: var(--surface); color: var(--text-2); }
 
 /* Shared icon look: 24-unit stroke icons drawn at 16px. */
