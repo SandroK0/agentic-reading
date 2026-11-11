@@ -37,7 +37,6 @@ const modelSelect = $<HTMLSelectElement>("model");
 const themeSelect = $<HTMLSelectElement>("theme");
 const selectionMenu = $("selection-menu");
 const questionInput = $<HTMLInputElement>("selection-question");
-const explainPageBtn = $<HTMLButtonElement>("explain-page");
 const cardsEl = $("cards");
 const cardsEmpty = $("cards-empty");
 const countEl = $("count");
@@ -108,7 +107,6 @@ async function openBook(path: string) {
   nav.hidden = false;
   emptyEl.hidden = true;
   pagesEl.hidden = false;
-  explainPageBtn.disabled = false;
   tocBtn.hidden = false;
   setTocVisible(tocPreference());
 
@@ -408,7 +406,6 @@ questionInput.onkeydown = (e) => {
 };
 $("explain-text").onclick = () => explainSelection("text");
 $("explain-visual").onclick = () => explainSelection("visual");
-explainPageBtn.onclick = () => void explainPassage(pages.current, "", "visual");
 
 document.addEventListener("mouseup", (e) => {
   if (selectionMenu.contains(e.target as Node)) return;
