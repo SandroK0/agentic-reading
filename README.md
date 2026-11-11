@@ -37,15 +37,16 @@ Open the DMG and drag the app to Applications. It shares its library with `npm s
 
 ## Use
 
-- **Open a book:** click Open (⌘O), drop a PDF or EPUB on the window, or use File → Open recent.
-- **Read:** scroll through the book continuously, or jump a page with ‹ › or the ← → keys. Use − + to zoom. The app remembers your page in each book.
+- **Open a book:** click Open (⌘O), drop a PDF or EPUB on the window, or pick one in the library. The library is the home screen: the book you were last reading, with how far you are, and the others you've opened. The books icon at the top left goes back to it. File → Open recent works too.
+- **Read:** scroll through the book continuously, or use the ← → keys. The small bar in the bottom-right corner of the page shows where you are: click the number to jump to a page, ‹ › to turn one, − + to zoom. It stays faint until you point at it. The app remembers your page in each book.
+- **Contents:** the sidebar lists the book's chapters, with the one you're in highlighted, a box to filter them, and how far through the book you are.
 - **EPUBs** show in the reader's theme and reflow to fit the window; − + changes the type size. The book's own styles are dropped. The page box counts the book's sections (usually chapters) instead of pages, and the app remembers how far through a section you were.
 - **Explain a passage:** select text, then click **Explain** (`E`) for a few sentences, or **Explain visually** (`V`) for a drawing.
 - **Follow up:** type a question under any explainer. Follow-ups continue the same conversation and keep its style, so Claude remembers the passage.
 - **No contents in the PDF?** Click **Generate with AI** in the Contents sidebar. It reads the book's headings and any printed contents page, and the result is saved with the book. **Regenerate** and **Remove** sit at the top of the list.
-- **Move the explanations:** the button at the top of the panel opens it in its own window (closing that window, or the same button, puts it back). × hides it; the **Explanations** button in the toolbar brings it back.
-- **Pick a theme** in the toolbar: Paper & Ink, Graphite & Violet and Forest Study follow your system's light or dark mode; Night Library is always dark and dims the page. Drawings follow the theme. Themes live in `shared/themes.ts`.
-- **Pick a model** in the toolbar: Haiku is fastest, Sonnet is faster, Opus gives the best results, or try Fable 5.2.
+- **Move the explanations:** the button at the top of the panel opens it in its own window (closing that window, or the same button, puts it back). × hides it; the panel button at the top right brings it back. **This page** shows only the explanations for the page you're reading; **All** shows the whole book's.
+- **Pick a theme** in the settings menu (the sliders at the top right): Paper & Ink, Graphite & Violet and Forest Study follow your system's light or dark mode; Night Library is always dark and dims the page. Drawings follow the theme. Themes live in `shared/themes.ts`.
+- **Pick a model** in the same menu: Haiku is fastest, Sonnet is faster, Opus gives the best results, or try Fable 5.2.
 - Explainers are saved per book. Click a card's page badge (`p. 12`, or `§ 3` in an EPUB) to jump back to it; in an EPUB it scrolls to the passage itself.
 
 ## How it works
