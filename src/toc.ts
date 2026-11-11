@@ -2,8 +2,8 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { ContentsEntry } from "../shared/types";
 
 /**
- * The Contents sidebar. It shows the PDF's own outline (its bookmarks) when
- * there is one. Otherwise it offers to generate a table of contents with the
+ * The Contents sidebar. It shows the book's own contents (a PDF's outline,
+ * an EPUB's table of contents) when there are any. Otherwise it offers to generate a table of contents with the
  * model, shows a saved one the same way, and lets you regenerate or remove
  * it. Entries jump to their page, and the section you're reading stays highlighted.
  */
@@ -14,12 +14,15 @@ interface OutlineNode {
   items: OutlineNode[];
 }
 
-/** A contents entry with its page resolved, from either source. */
-interface Node {
+/** A contents entry with its page resolved, from any source: a PDF outline, an EPUB's contents, or the model. */
+export interface ContentsNode {
   title: string;
   page: number | null;
-  items: Node[];
+  /** Where in the page the entry starts, when the book says (EPUB). */
+  anchor?: string;
+  items: ContentsNode[];
 }
+type Node = ContentsNode;
 
 interface Entry {
   page: number | null;
@@ -48,12 +51,15 @@ export class Contents {
 
   constructor(
     private body: HTMLElement,
-    private go: (page: number) => void,
+    private go: (page: number, anchor?: string) => void,
     private generation: ContentsGeneration,
   ) {}
 
-  /** Shows the book's outline, or its saved generated contents, or the offer to generate some. */
-  async load(doc: PDFDocumentProxy, generated?: ContentsEntry[]) {
+  /**
+   * Shows the book's own contents, or its saved generated contents, or the
+   * offer to generate some when `canGenerate` (only PDFs can be read for that).
+   */
+  async load(own: () => Promise<ContentsNode[]>, generated?: ContentsEntry[], canGenerate = true) {
     const token = ++this.loadToken;
     this.generating?.abort();
     this.generating = null;
@@ -61,13 +67,13 @@ export class Contents {
     this.reset();
     this.body.replaceChildren(this.message("Loading contents…"));
 
-    const outline = ((await doc.getOutline().catch(() => null)) ?? []) as OutlineNode[];
-    const nodes = await resolveOutline(doc, outline);
+    const nodes = await own().catch(() => []);
     if (token !== this.loadToken) return;
 
     if (nodes.length) this.show(nodes);
     else if (this.generated) this.showGenerated(this.generated);
-    else this.showOffer();
+    else if (canGenerate) this.showOffer();
+    else this.body.replaceChildren(this.message("This book has no table of contents."));
   }
 
   /** Highlights the last section that starts at or before `page`. */
@@ -180,8 +186,8 @@ export class Contents {
       pageLabel.textContent = node.page ? String(node.page) : "";
       link.append(title, pageLabel);
       link.title = node.title.trim();
-      const page = node.page;
-      if (page) link.onclick = () => this.go(page);
+      const { page, anchor } = node;
+      if (page) link.onclick = () => this.go(page, anchor);
       else link.disabled = true;
       row.append(twisty, link);
       li.append(row);
@@ -239,6 +245,12 @@ function nestEntries(entries: ContentsEntry[]): Node[] {
     stack.push({ level: entry.level, node });
   }
   return roots;
+}
+
+/** A PDF's own outline (its bookmarks), with each entry's page looked up. */
+export async function pdfOutline(doc: PDFDocumentProxy): Promise<ContentsNode[]> {
+  const outline = ((await doc.getOutline().catch(() => null)) ?? []) as OutlineNode[];
+  return resolveOutline(doc, outline);
 }
 
 async function resolveOutline(doc: PDFDocumentProxy, outline: OutlineNode[]): Promise<Node[]> {

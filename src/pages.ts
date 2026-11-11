@@ -84,6 +84,21 @@ export class Pages {
     this.goTo(startPage);
   }
 
+  /** Lets go of the book, when another kind of book takes over the viewer. */
+  clear() {
+    this.observer.disconnect();
+    for (const slot of this.slots) this.release(slot);
+    this.slots = [];
+    this.near.clear();
+    this.texts.clear();
+    this.doc = null;
+  }
+
+  /** The page you're on; PDFs remember whole pages. */
+  position() {
+    return this.current;
+  }
+
   goTo(n: number) {
     if (!this.slots.length) return;
     const slot = this.slots[clampPage(n, this.slots.length) - 1];

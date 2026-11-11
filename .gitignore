@@ -3,3 +3,6 @@ dist
 selftest-out
 .DS_Store
 release
+
+# Books for trying the app and running the self-test; not ours to commit.
+test-books/

@@ -15,6 +15,7 @@ import path from "node:path";
  * VR_SELFTEST_SCREENSHOTS=<dir> stages two explanations and saves README screenshots there
  * (use with VR_SELFTEST_PROFILE=<name> for an empty profile).
  * VR_SELFTEST_GENERATE_TOC=1 generates contents for a PDF without an outline (or loads saved ones).
+ * An .epub runs its own shorter check (see epubSelfTest).
  */
 export async function runSelfTest(win: BrowserWindow, open: (p: string) => void, quit: (code: number) => void) {
   const pdf = process.env.VR_SELFTEST!;
@@ -40,6 +41,7 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
   try {
     open(pdf);
     if (!(await waitFor(`document.getElementById("page-total").textContent !== "/ –"`, 30_000))) throw new Error("book never opened");
+    if (/\.epub$/i.test(pdf)) return quit((await epubSelfTest(js, waitFor, shot)) ? 0 : 1);
 
     // README screenshots: two real explanations on the page, then the app in a few themes, saved to VR_SELFTEST_SCREENSHOTS.
     if (process.env.VR_SELFTEST_SCREENSHOTS) {
@@ -514,4 +516,104 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     await shot("error").catch(() => {});
     quit(1);
   }
+}
+
+type Js = <T>(code: string) => Promise<T>;
+
+/**
+ * EPUB check: the contents list, jumping and scrolling through sections, zoom
+ * keeping your place, then selecting a paragraph and asking for a written
+ * explanation (skipped with VR_SELFTEST_NO_EXPLAIN), whose card jumps back to the passage.
+ */
+async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promise<boolean>, shot: (name: string) => Promise<void>) {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  await waitFor(`!!document.querySelector(".epub-section")`, 15_000);
+  await waitFor(`!!document.querySelector(".toc-link") || !!document.querySelector(".toc-empty")`, 15_000);
+  const opened = await js<{ sections: number; total: string; title: string; entries: number; images: number; brokenImages: number }>(`({
+    sections: document.querySelectorAll(".epub-section").length,
+    total: document.getElementById("page-total").textContent,
+    title: document.getElementById("title").textContent,
+    entries: document.querySelectorAll(".toc-link:not(:disabled)").length,
+    images: document.querySelectorAll(".epub-section img").length,
+    brokenImages: [...document.querySelectorAll(".epub-section img")].filter((i) => i.complete && !i.naturalWidth).length,
+  })`);
+  console.log("[selftest] epub opened:", JSON.stringify(opened));
+  await shot("epub-1-open");
+
+  // A contents entry lands on its section and lights up.
+  const jump = await js<{ title: string; target: string } | null>(`(() => {
+    const links = [...document.querySelectorAll(".toc-link:not(:disabled)")];
+    const link = links[Math.min(3, links.length - 1)];
+    if (!link) return null;
+    link.click();
+    return { title: link.textContent, target: link.querySelector(".toc-page").textContent };
+  })()`);
+  await pause(800);
+  const landed = await js<{ page: string; active: string | null }>(`({ page: document.getElementById("page-input").value, active: document.querySelector(".toc-link.active")?.textContent ?? null })`);
+  const jumpOk = !!jump && jump.target === landed.page && landed.active === jump.title;
+  console.log(`[selftest] epub contents jump ok=${jumpOk}`, JSON.stringify({ ...jump, ...landed }));
+  await shot("epub-2-jump");
+
+  // Scrolling moves the section number on; zooming keeps the same text at the top.
+  await js(`document.getElementById("viewer").scrollTop += document.getElementById("viewer").clientHeight * 3`);
+  await pause(800);
+  const topText = `(() => { const v = document.getElementById("viewer").getBoundingClientRect(); const c = document.caretPositionFromPoint(v.left + v.width / 2, v.top + 40); return c?.offsetNode?.textContent?.trim().slice(0, 40) ?? null; })()`;
+  const before = await js<{ page: string; text: string | null }>(`({ page: document.getElementById("page-input").value, text: ${topText} })`);
+  await js(`document.getElementById("zoom-in").click()`);
+  await pause(500);
+  const after = await js<{ page: string; zoom: string; size: string; text: string | null }>(`({
+    page: document.getElementById("page-input").value,
+    zoom: document.getElementById("zoom-label").textContent,
+    size: getComputedStyle(document.querySelector(".epub-section")).fontSize,
+    text: ${topText},
+  })`);
+  const zoomOk = after.zoom === "125%" && after.page === before.page;
+  console.log(`[selftest] epub scroll+zoom ok=${zoomOk}`, JSON.stringify({ before, after }));
+  await shot("epub-3-zoomed");
+  await js(`document.getElementById("zoom-out").click()`);
+
+  // Select a paragraph the way a mouse would, and check the menu comes up.
+  const selected = await js<{ text: string; section: string } | null>(`(() => {
+    const sheet = document.querySelectorAll(".epub-section")[${jump?.target ?? 1} - 1];
+    const p = [...sheet.querySelectorAll("p")].find((p) => p.textContent.trim().length > 120);
+    if (!p) return null;
+    p.scrollIntoView({ block: "center" });
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    return { text: p.textContent.trim().slice(0, 60), section: sheet.dataset.page };
+  })()`);
+  await pause(300);
+  const menu = await js<boolean>(`!document.getElementById("selection-menu").hidden`);
+  console.log(`[selftest] epub selection menu=${menu}`, JSON.stringify(selected));
+  await shot("epub-4-selected");
+  if (!selected || !menu) return false;
+
+  if (process.env.VR_SELFTEST_NO_EXPLAIN) return jumpOk && zoomOk && opened.sections > 0 && opened.brokenImages === 0;
+
+  await js(`document.getElementById("explain-text").click()`);
+  const done = await waitFor(`!!document.querySelector(".card .followup:not([hidden])") || !!document.querySelector(".card .status.error")`, 180_000);
+  const card = await js<{ error: string | null; label: string; prose: string }>(`({
+    error: document.querySelector(".card .status.error")?.textContent ?? null,
+    label: document.querySelector(".card .page-link")?.textContent ?? "",
+    prose: document.querySelector(".card .prose")?.textContent?.slice(0, 200) ?? "",
+  })`);
+  console.log(`[selftest] epub explain finished=${done}`, JSON.stringify(card));
+
+  // The card's link goes back to the passage, even from far away.
+  await js(`document.getElementById("viewer").scrollTop = 0`);
+  await pause(300);
+  await js(`document.querySelector(".card .page-link").click()`);
+  await pause(500);
+  const back = await js<{ page: string; visible: boolean }>(`(() => {
+    const v = document.getElementById("viewer").getBoundingClientRect();
+    const p = [...document.querySelectorAll(".epub-section p")].find((p) => p.textContent.trim().startsWith(${JSON.stringify(selected.text)}));
+    const r = p?.getBoundingClientRect();
+    return { page: document.getElementById("page-input").value, visible: !!r && r.top >= v.top - 1 && r.top < v.bottom };
+  })()`);
+  console.log("[selftest] epub card jump:", JSON.stringify(back));
+  await shot("epub-5-explained");
+  return done && !card.error && back.page === selected.section && back.visible && jumpOk && zoomOk;
 }

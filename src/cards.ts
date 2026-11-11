@@ -33,7 +33,10 @@ interface Card {
 
 export interface CardsOptions {
   api: ReaderApi;
-  goTo: (page: number) => void;
+  /** Scrolls the book to where an explanation's passage is (an empty passage means the whole page). */
+  goTo: (page: number, passage: string) => void;
+  /** How a page is named on a card: "p. 12" in a PDF, "§ 3" for an EPUB's third section. */
+  pageLabel: (page: number) => { short: string; title: string };
   /** The reader's theme and the light/dark palette it's showing, which drawings copy. */
   look: () => { theme: string; scheme: "light" | "dark" };
   /** Called when an explanation starts, so the panel can make sure it's visible. */
@@ -194,9 +197,10 @@ export class ExplanationCards {
     head.className = "card-head";
     const pageLink = document.createElement("button");
     pageLink.className = "page-link";
-    pageLink.textContent = `p. ${data.page}`;
-    pageLink.title = "Go to this page";
-    pageLink.onclick = () => this.opts.goTo(data.page);
+    const label = this.opts.pageLabel(data.page);
+    pageLink.textContent = label.short;
+    pageLink.title = label.title;
+    pageLink.onclick = () => this.opts.goTo(data.page, data.passage);
     const summary = document.createElement("button");
     summary.className = "card-summary";
     summary.title = "Minimise or expand";

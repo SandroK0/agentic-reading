@@ -44,7 +44,8 @@ function rememberWidgets(e: Explanation) {
 }
 
 let win: BrowserWindow | null = null;
-let pendingOpen: string | null = process.argv.find((a) => a.toLowerCase().endsWith(".pdf")) ?? null;
+const BOOK_FILE = /\.(pdf|epub)$/i;
+let pendingOpen: string | null = process.argv.find((a) => BOOK_FILE.test(a)) ?? null;
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -147,9 +148,9 @@ function sendOpen(bookPath: string) {
 
 async function openWithDialog(): Promise<string | null> {
   const result = await dialog.showOpenDialog(win!, {
-    title: "Open a PDF",
+    title: "Open a book",
     properties: ["openFile"],
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
+    filters: [{ name: "Books", extensions: ["pdf", "epub"] }],
   });
   return result.canceled ? null : result.filePaths[0] ?? null;
 }
@@ -188,9 +189,9 @@ function buildMenu() {
   );
 }
 
-function assertPdf(bookPath: unknown): string {
-  if (typeof bookPath !== "string" || !path.isAbsolute(bookPath) || !bookPath.toLowerCase().endsWith(".pdf")) {
-    throw new Error("Not a PDF path");
+function assertBook(bookPath: unknown): string {
+  if (typeof bookPath !== "string" || !path.isAbsolute(bookPath) || !BOOK_FILE.test(bookPath)) {
+    throw new Error("Not a PDF or EPUB path");
   }
   return bookPath;
 }
@@ -198,22 +199,22 @@ function assertPdf(bookPath: unknown): string {
 function registerIpc() {
   ipcMain.handle("book:open-dialog", () => openWithDialog());
   ipcMain.handle("book:read", async (_e, bookPath: string) => {
-    const file = assertPdf(bookPath);
+    const file = assertBook(bookPath);
     const bytes = await fs.promises.readFile(file);
     store.touchRecent(file);
     buildMenu();
     return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   });
   ipcMain.handle("book:recents", () => store.recents());
-  ipcMain.handle("book:state", (_e, bookPath: string) => store.bookState(assertPdf(bookPath)));
-  ipcMain.handle("book:save-page", (_e, bookPath: string, page: number) => store.savePage(assertPdf(bookPath), page));
+  ipcMain.handle("book:state", (_e, bookPath: string) => store.bookState(assertBook(bookPath)));
+  ipcMain.handle("book:save-page", (_e, bookPath: string, page: number) => store.savePage(assertBook(bookPath), page));
   ipcMain.handle("explanation:save", (_e, bookPath: string, explanation: Explanation) => {
     rememberWidgets(explanation);
-    store.saveExplanation(assertPdf(bookPath), explanation);
+    store.saveExplanation(assertBook(bookPath), explanation);
   });
   ipcMain.handle("explanation:delete", (_e, bookPath: string, id: string) => {
     widgets.delete(id);
-    store.deleteExplanation(assertPdf(bookPath), id);
+    store.deleteExplanation(assertBook(bookPath), id);
   });
   ipcMain.handle("settings:get", () => store.settings());
   ipcMain.handle("settings:save", (_e, settings: Settings) => store.saveSettings(settings));
@@ -223,7 +224,7 @@ function registerIpc() {
       if (event.type === "done") widgets.set(event.id, event.html);
       if (!e.sender.isDestroyed()) e.sender.send("explain:event", event);
     };
-    const bookPath = assertPdf(req.bookPath);
+    const bookPath = assertBook(req.bookPath);
     const parent = req.parentId ? store.bookState(bookPath).explanations.find((x) => x.id === req.parentId) : undefined;
     void explainer.explain(req, store.settings(), parent, emit);
   });
@@ -231,16 +232,16 @@ function registerIpc() {
   ipcMain.handle("llm:providers", () => explainer.catalog());
 
   ipcMain.handle("contents:generate", async (_e, bookPath: string, source: ContentsSource) => {
-    const file = assertPdf(bookPath);
+    const file = assertBook(bookPath);
     const contents = await contentsGenerator.generate(file, source, store.settings());
     store.saveGeneratedContents(file, contents);
     return contents;
   });
-  ipcMain.handle("contents:cancel", (_e, bookPath: string) => contentsGenerator.cancel(assertPdf(bookPath)));
-  ipcMain.handle("contents:remove", (_e, bookPath: string) => store.saveGeneratedContents(assertPdf(bookPath), null));
+  ipcMain.handle("contents:cancel", (_e, bookPath: string) => contentsGenerator.cancel(assertBook(bookPath)));
+  ipcMain.handle("contents:remove", (_e, bookPath: string) => store.saveGeneratedContents(assertBook(bookPath), null));
 }
 
-// macOS "Open with" / dropping a PDF on the Dock icon.
+// macOS "Open with" / dropping a book on the Dock icon.
 app.on("open-file", (event, filePath) => {
   event.preventDefault();
   sendOpen(filePath);

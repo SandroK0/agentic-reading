@@ -8,7 +8,8 @@ import { ExplanationCards } from "./cards";
 import { resizableSidebar } from "./resize";
 import { enableTextSelection } from "./selection";
 import { collectContentsSource } from "./contents-source";
-import { Contents } from "./toc";
+import { Contents, pdfOutline } from "./toc";
+import { EpubView, parseEpub } from "./epub";
 import "./style.css";
 
 declare global {
@@ -44,12 +45,13 @@ const emptyEl = $("empty");
 const recentsEl = $("recents");
 const tocEl = $("toc");
 const tocBtn = $<HTMLButtonElement>("toc-btn");
-const contents = new Contents($("toc-body"), (page) => pages.goTo(page), {
+const contents = new Contents($("toc-body"), (page, anchor) => goTo(page, { anchor }), {
   async generate(onProgress, signal) {
     const current = book!;
-    const total = current.doc.numPages;
+    if (!current.pdf) throw new Error("Only PDFs can have contents generated.");
+    const total = current.pageCount;
     onProgress(`Reading page 1 of ${total}…`);
-    const source = await collectContentsSource(current.doc, current.title, (n) => onProgress(`Reading page ${n} of ${total}…`), signal);
+    const source = await collectContentsSource(current.pdf, current.title, (n) => onProgress(`Reading page ${n} of ${total}…`), signal);
     onProgress("Writing the contents. This can take a minute…");
     signal.addEventListener("abort", () => void api.cancelContents(current.path), { once: true });
     try {
@@ -66,15 +68,33 @@ function ipcMessage(err: unknown): string {
   return String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, "");
 }
 const pages = new Pages(viewer, pagesEl, showPage);
+const epubView = new EpubView(viewer, pagesEl, showPage);
 enableTextSelection(viewer);
 
+/**
+ * An open book. In a PDF a "page" is a page; in an EPUB it's one section of
+ * the book's reading order (usually a chapter), which the rest of the app
+ * treats just like a page.
+ */
 interface Book {
   path: string;
   title: string;
-  doc: pdfjsLib.PDFDocumentProxy;
+  kind: "pdf" | "epub";
+  pageCount: number;
+  pdf?: pdfjsLib.PDFDocumentProxy;
 }
 
 let book: Book | null = null;
+/** Whichever reader is showing the open book. */
+let view: Pages | EpubView = pages;
+
+const BOOK_FILE = /\.(pdf|epub)$/i;
+
+/** Scrolls to a page; in an EPUB also to an anchor or a quoted passage within it. */
+function goTo(page: number, target: { anchor?: string; passage?: string } = {}) {
+  if (view instanceof EpubView) view.goTo(page, target);
+  else view.goTo(page);
+}
 
 // ---------- Opening books ----------
 
@@ -86,24 +106,50 @@ async function openBook(path: string) {
     alert(`Couldn't open this file.\n\n${(err as Error).message}`);
     return;
   }
-  const doc = await pdfjsLib.getDocument({
-    data: bytes,
-    standardFontDataUrl: "./pdfjs/standard_fonts/",
-    cMapUrl: "./pdfjs/cmaps/",
-    cMapPacked: true,
-  }).promise;
+  const fileName = path.split("/").pop()!.replace(BOOK_FILE, "");
+  const isEpub = /\.epub$/i.test(path);
+  let epub: ReturnType<typeof parseEpub> | null = null;
+  let pdf: pdfjsLib.PDFDocumentProxy | null = null;
+  let metaTitle: string | undefined;
+  try {
+    if (isEpub) {
+      epub = parseEpub(bytes);
+      metaTitle = epub.title ?? undefined;
+    } else {
+      pdf = await pdfjsLib.getDocument({
+        data: bytes,
+        standardFontDataUrl: "./pdfjs/standard_fonts/",
+        cMapUrl: "./pdfjs/cmaps/",
+        cMapPacked: true,
+      }).promise;
+      const meta = await pdf.getMetadata().catch(() => null);
+      metaTitle = (meta?.info as { Title?: string } | undefined)?.Title?.trim();
+    }
+  } catch (err) {
+    alert(`Couldn't read this book.\n\n${(err as Error).message}`);
+    return;
+  }
 
-  await book?.doc.destroy();
-  const meta = await doc.getMetadata().catch(() => null);
-  const metaTitle = (meta?.info as { Title?: string } | undefined)?.Title?.trim();
-  const fileName = path.split("/").pop()!.replace(/\.pdf$/i, "");
-  book = { path, title: metaTitle && metaTitle.length > 3 ? metaTitle : fileName, doc };
+  await book?.pdf?.destroy();
+  const pageCount = epub ? epub.sections.length : pdf!.numPages;
+  book = {
+    path,
+    title: metaTitle && metaTitle.length > 3 ? metaTitle : fileName,
+    kind: epub ? "epub" : "pdf",
+    pageCount,
+    pdf: pdf ?? undefined,
+  };
 
   titleEl.textContent = book.title;
   document.title = `${book.title} — Agentic Reading`;
   panelWindow.setTitle(`Explanations — ${book.title}`);
-  pageTotal.textContent = `/ ${doc.numPages}`;
-  pageInput.max = String(doc.numPages);
+  pageTotal.textContent = `/ ${pageCount}`;
+  pageInput.max = String(pageCount);
+  const unit = epub ? "Section" : "Page";
+  pageInput.setAttribute("aria-label", `${unit} number`);
+  pageInput.title = epub ? "Section of the book (usually a chapter)" : "";
+  prevBtn.setAttribute("aria-label", `Previous ${unit.toLowerCase()}`);
+  nextBtn.setAttribute("aria-label", `Next ${unit.toLowerCase()}`);
   nav.hidden = false;
   emptyEl.hidden = true;
   pagesEl.hidden = false;
@@ -111,9 +157,22 @@ async function openBook(path: string) {
   setTocVisible(tocPreference());
 
   const state = await api.bookState(path);
-  void contents.load(doc, state.generatedContents?.entries);
+  if (epub) {
+    const own = epub.contents;
+    void contents.load(async () => own, undefined, false);
+  } else {
+    void contents.load(() => pdfOutline(pdf!), state.generatedContents?.entries);
+  }
   explanations.show(path, state.explanations);
-  await pages.load(doc, state.page);
+  if (epub) {
+    pages.clear();
+    view = epubView;
+    await epubView.load(epub, state.page);
+  } else {
+    epubView.clear();
+    view = pages;
+    await pages.load(pdf!, state.page);
+  }
 }
 
 async function showRecents() {
@@ -133,24 +192,25 @@ async function showRecents() {
 
 let savePageTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** Called whenever the page you're reading changes, by scrolling or jumping. */
+/** Called whenever the page you're reading changes (for an EPUB, whenever you scroll), by scrolling or jumping. */
 function showPage(n: number) {
   if (!book) return;
-  pageInput.value = String(n);
+  if (document.activeElement !== pageInput) pageInput.value = String(n);
   contents.setPage(n);
   prevBtn.disabled = n <= 1;
-  nextBtn.disabled = n >= book.doc.numPages;
+  nextBtn.disabled = n >= book.pageCount;
   clearTimeout(savePageTimer);
   const path = book.path;
-  savePageTimer = setTimeout(() => api.savePage(path, n), 400);
+  const reader = view;
+  savePageTimer = setTimeout(() => api.savePage(path, reader.position()), 400);
 }
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 
 function setZoom(zoom: number, anchor?: { x: number; y: number }) {
-  pages.setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), anchor);
-  zoomLabel.textContent = `${Math.round(pages.zoomLevel * 100)}%`;
+  view.setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), anchor);
+  zoomLabel.textContent = `${Math.round(view.zoomLevel * 100)}%`;
 }
 
 // Ctrl + scroll zooms around the pointer. A trackpad pinch arrives the same way, in smaller steps.
@@ -161,7 +221,7 @@ viewer.addEventListener(
     e.preventDefault();
     const delta = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 16 : e.deltaY;
     const box = viewer.getBoundingClientRect();
-    setZoom(pages.zoomLevel * Math.exp(-delta * 0.0015), { x: e.clientX - box.left, y: e.clientY - box.top });
+    setZoom(view.zoomLevel * Math.exp(-delta * 0.0015), { x: e.clientX - box.left, y: e.clientY - box.top });
   },
   { passive: false },
 );
@@ -241,7 +301,8 @@ function selectedPassage(): { text: string; page: number; rect: DOMRect; upward:
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
   const anchor = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement;
-  const pageEl = anchor?.closest<HTMLElement>(".textLayer")?.closest<HTMLElement>(".page");
+  const pageEl =
+    anchor?.closest<HTMLElement>(".textLayer")?.closest<HTMLElement>(".page") ?? anchor?.closest<HTMLElement>(".epub-section");
   if (!pageEl || !pagesEl.contains(pageEl)) return null;
   const text = sel.toString().replace(/\s+/g, " ").trim();
   if (text.length < 2) return null;
@@ -312,7 +373,7 @@ function explainSelection(mode: ExplainMode) {
 }
 
 async function surrounding(page: number, passage: string): Promise<string> {
-  const text = (await pages.text(page)).replace(/\s+/g, " ");
+  const text = (await view.text(page)).replace(/\s+/g, " ");
   const at = text.indexOf(passage.slice(0, 60));
   if (at < 0) return text.slice(0, PASSAGE_CONTEXT_CHARS * 2);
   return text.slice(Math.max(0, at - PASSAGE_CONTEXT_CHARS), at + passage.length + PASSAGE_CONTEXT_CHARS);
@@ -322,19 +383,23 @@ async function surrounding(page: number, passage: string): Promise<string> {
 
 const explanations = new ExplanationCards(cardsEl, cardsEmpty, countEl, {
   api,
-  goTo: (page) => pages.goTo(page),
+  goTo: (page, passage) => goTo(page, { passage }),
+  pageLabel: (page) =>
+    book?.kind === "epub"
+      ? { short: `§ ${page}`, title: "Go to this passage" }
+      : { short: `p. ${page}`, title: "Go to this page" },
   look: () => ({ theme: currentTheme(), scheme: currentScheme() }),
   // A new explanation shouldn't land in a hidden panel.
   onStart: () => {
     if (panelWindow.place === "hidden") panelWindow.dock();
   },
-  book: () => (book ? { path: book.path, title: book.title, pageCount: book.doc.numPages } : null),
+  book: () => (book ? { path: book.path, title: book.title, pageCount: book.pageCount } : null),
 });
 
 async function explainPassage(page: number, passage: string, mode: ExplainMode, question?: string) {
   if (!book) return;
   const current = book;
-  const context = passage ? await surrounding(page, passage) : (await pages.text(page)).slice(0, PAGE_CONTEXT_CHARS);
+  const context = passage ? await surrounding(page, passage) : (await view.text(page)).slice(0, PAGE_CONTEXT_CHARS);
   if (book !== current) return;
   explanations.explain(current.path, {
     mode,
@@ -342,7 +407,7 @@ async function explainPassage(page: number, passage: string, mode: ExplainMode, 
     bookPath: current.path,
     bookTitle: current.title,
     page,
-    pageCount: current.doc.numPages,
+    pageCount: current.pageCount,
     passage,
     context,
   });
@@ -380,11 +445,11 @@ $("open-btn").onclick = async () => {
 };
 api.onOpenBook((path) => void openBook(path));
 
-prevBtn.onclick = () => pages.goTo(pages.current - 1);
-nextBtn.onclick = () => pages.goTo(pages.current + 1);
-pageInput.onchange = () => pages.goTo(Number(pageInput.value));
-$("zoom-in").onclick = () => setZoom(pages.zoomLevel + 0.25);
-$("zoom-out").onclick = () => setZoom(pages.zoomLevel - 0.25);
+prevBtn.onclick = () => goTo(view.current - 1);
+nextBtn.onclick = () => goTo(view.current + 1);
+pageInput.onchange = () => goTo(Number(pageInput.value));
+$("zoom-in").onclick = () => setZoom(view.zoomLevel + 0.25);
+$("zoom-out").onclick = () => setZoom(view.zoomLevel - 0.25);
 
 // Options are "<provider>/<model>"; provider ids never contain a slash.
 modelSelect.onchange = () => {
@@ -426,8 +491,8 @@ document.addEventListener("keydown", (e) => {
   const t = e.target as HTMLElement;
   if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
   if (!book) return;
-  if (e.key === "ArrowRight") pages.goTo(pages.current + 1);
-  else if (e.key === "ArrowLeft") pages.goTo(pages.current - 1);
+  if (e.key === "ArrowRight") goTo(view.current + 1);
+  else if (e.key === "ArrowLeft") goTo(view.current - 1);
   else if (!e.metaKey && !e.ctrlKey && !e.altKey) {
     const key = e.key.toLowerCase();
     if (key === "e") explainSelection("text");
@@ -444,7 +509,7 @@ viewer.addEventListener("drop", (e) => {
   e.preventDefault();
   viewer.classList.remove("dragging");
   const file = e.dataTransfer?.files[0];
-  if (file && file.name.toLowerCase().endsWith(".pdf")) void openBook(api.pathForFile(file));
+  if (file && BOOK_FILE.test(file.name)) void openBook(api.pathForFile(file));
 });
 
 resizableSidebar(tocEl, $("toc-resizer"), {
@@ -470,7 +535,7 @@ new ResizeObserver(() => {
   clearTimeout(relayoutTimer);
   relayoutTimer = setTimeout(() => {
     lastWidth = viewer.clientWidth;
-    if (book) pages.relayout();
+    if (book) view.relayout();
   }, 120);
 }).observe(viewer);
 

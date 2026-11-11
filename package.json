@@ -51,7 +51,16 @@
         "name": "PDF document",
         "role": "Viewer",
         "rank": "Alternate"
+      },
+      {
+        "ext": "epub",
+        "name": "EPUB book",
+        "role": "Viewer",
+        "rank": "Alternate"
       }
     ]
+  },
+  "dependencies": {
+    "fflate": "^0.8.2"
   }
 }
