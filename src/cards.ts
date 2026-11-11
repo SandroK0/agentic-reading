@@ -43,19 +43,52 @@ export interface CardsOptions {
   onStart: () => void;
   /** Book details for follow-up requests. */
   book: () => { path: string; title: string; pageCount: number } | null;
+  /** Called when the cards switch between this page's and all of them on their own, e.g. to show a new one. */
+  onScope: (scope: CardScope) => void;
 }
+
+/** Which cards the panel shows: those for the page you're reading, or all of the book's. */
+export type CardScope = "page" | "all";
+
+const ICONS = {
+  visual:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="7" height="6" rx="1.5" /><rect x="13.5" y="13.5" width="7" height="6" rx="1.5" /><path d="M7 10.5v3a3 3 0 0 0 3 3h3.5" /></svg>',
+  text: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" /></svg>',
+  chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 14.5l6-6 6 6" /></svg>',
+  close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>',
+  send: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>',
+};
 
 export class ExplanationCards {
   private cards = new Map<string, Card>();
   /** Card by the id of the turn being written, for routing stream events. */
   private byTurn = new Map<string, Card>();
+  private page = 1;
+  private scope: CardScope;
 
   constructor(
     private container: HTMLElement,
     private empty: HTMLElement,
-    private count: HTMLElement,
+    private counts: { all: HTMLElement; page: HTMLElement },
     private opts: CardsOptions,
-  ) {}
+    scope: CardScope = "page",
+  ) {
+    this.scope = scope;
+  }
+
+  /** The page you're reading, for the "This page" view. */
+  setPage(page: number) {
+    if (page === this.page) return;
+    this.page = page;
+    this.updateCount();
+  }
+
+  setScope(scope: CardScope) {
+    if (scope === this.scope) return;
+    this.scope = scope;
+    this.updateCount();
+    this.opts.onScope(scope);
+  }
 
   /** Shows a book's saved explanations, newest first. */
   show(bookPath: string, explanations: Explanation[]) {
@@ -76,6 +109,8 @@ export class ExplanationCards {
   explain(bookPath: string, req: Omit<ExplainRequest, "id">) {
     const id = newId();
     const card = this.makeCard({ id, page: req.page, passage: req.passage, question: req.question, mode: req.mode }, bookPath);
+    // A passage selected across a page break can belong to the page before; don't let its card start out of sight.
+    if (this.scope === "page" && req.page !== this.page) this.setScope("all");
     this.container.prepend(card.el);
     this.container.scrollTop = 0;
     this.updateCount();
@@ -201,6 +236,13 @@ export class ExplanationCards {
     pageLink.textContent = label.short;
     pageLink.title = label.title;
     pageLink.onclick = () => this.opts.goTo(data.page, data.passage);
+    const kind = document.createElement("span");
+    kind.className = "card-kind";
+    const visual = (data.mode ?? "visual") === "visual";
+    kind.innerHTML = visual ? ICONS.visual : ICONS.text;
+    kind.append(visual ? "Visual" : "Written");
+    const spacer = document.createElement("span");
+    spacer.className = "card-spacer";
     const summary = document.createElement("button");
     summary.className = "card-summary";
     summary.title = "Minimise or expand";
@@ -213,12 +255,13 @@ export class ExplanationCards {
     summary.append(quote, meta);
     const toggle = document.createElement("button");
     toggle.className = "card-toggle";
-    toggle.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg>';
+    toggle.innerHTML = ICONS.chevron;
     const del = document.createElement("button");
     del.className = "card-delete";
-    del.textContent = "×";
+    del.innerHTML = ICONS.close;
     del.title = "Remove";
-    head.append(pageLink, summary, toggle, del);
+    del.setAttribute("aria-label", "Remove");
+    head.append(pageLink, kind, spacer, toggle, del, summary);
 
     const body = document.createElement("div");
     body.className = "card-body";
@@ -229,9 +272,12 @@ export class ExplanationCards {
     form.className = "followup";
     form.hidden = true;
     const input = document.createElement("input");
-    input.placeholder = "Ask a follow-up…";
+    input.placeholder = "Ask a follow-up";
+    input.setAttribute("aria-label", "Ask a follow-up");
     const ask = document.createElement("button");
-    ask.textContent = "Ask";
+    ask.innerHTML = ICONS.send;
+    ask.title = "Ask";
+    ask.setAttribute("aria-label", "Ask");
     form.append(input, ask);
     body.append(status, form);
     el.append(head, body);
@@ -300,6 +346,7 @@ export class ExplanationCards {
     card.el.classList.toggle("collapsed", collapsed);
     const toggle = card.el.querySelector<HTMLButtonElement>(".card-toggle")!;
     toggle.title = collapsed ? "Expand" : "Minimise";
+    toggle.setAttribute("aria-label", toggle.title);
     toggle.setAttribute("aria-expanded", String(!collapsed));
   }
 
@@ -347,10 +394,23 @@ export class ExplanationCards {
     card.status.hidden = true;
   }
 
+  /** Updates both counts and shows only the cards in the current view. */
   private updateCount() {
+    let onPage = 0;
+    for (const card of this.cards.values()) {
+      const here = card.data.page === this.page;
+      if (here) onPage++;
+      card.el.classList.toggle("off-scope", this.scope === "page" && !here);
+    }
     const n = this.cards.size;
-    this.count.textContent = n ? `(${n})` : "";
-    this.empty.hidden = n > 0;
+    this.counts.all.textContent = n ? String(n) : "";
+    this.counts.page.textContent = onPage ? String(onPage) : "";
+    const shown = this.scope === "page" ? onPage : n;
+    this.empty.hidden = shown > 0;
+    this.empty.textContent =
+      n && this.scope === "page"
+        ? "Nothing explained on this page yet. Select a passage and choose Explain."
+        : "Select a passage in the book and choose Explain. Your explanations collect here.";
   }
 }
 

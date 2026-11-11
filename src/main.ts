@@ -1,10 +1,10 @@
 import * as pdfjsLib from "pdfjs-dist";
 import "pdfjs-dist/web/pdf_viewer.css";
-import type { ExplainMode, ReaderApi } from "../shared/types";
+import type { ExplainMode, LibraryBook, ReaderApi } from "../shared/types";
 import { Pages } from "./pages";
 import { PanelWindow } from "./panel-window";
 import { allThemesCss, themeById, THEMES } from "../shared/themes";
-import { ExplanationCards } from "./cards";
+import { ExplanationCards, type CardScope } from "./cards";
 import { resizableSidebar } from "./resize";
 import { enableTextSelection } from "./selection";
 import { collectContentsSource } from "./contents-source";
@@ -28,7 +28,16 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const viewer = $("viewer");
 const pagesEl = $("pages");
 const titleEl = $("title");
+const subtitleEl = $("subtitle");
+const homeBtn = $<HTMLButtonElement>("home-btn");
+const tbDivider = $("tb-divider");
 const nav = $("nav");
+const pagePrefix = $("page-prefix");
+const progressLabel = $("progress-label");
+const progressPct = $("progress-pct");
+const progressBar = $("progress-bar");
+const tocBody = $("toc-body");
+const tocFilter = $<HTMLInputElement>("toc-filter");
 const pageInput = $<HTMLInputElement>("page-input");
 const pageTotal = $("page-total");
 const prevBtn = $<HTMLButtonElement>("prev");
@@ -40,12 +49,10 @@ const selectionMenu = $("selection-menu");
 const questionInput = $<HTMLInputElement>("selection-question");
 const cardsEl = $("cards");
 const cardsEmpty = $("cards-empty");
-const countEl = $("count");
 const emptyEl = $("empty");
-const recentsEl = $("recents");
 const tocEl = $("toc");
 const tocBtn = $<HTMLButtonElement>("toc-btn");
-const contents = new Contents($("toc-body"), (page, anchor) => goTo(page, { anchor }), {
+const contents = new Contents(tocBody, (page, anchor) => goTo(page, { anchor }), {
   async generate(onProgress, signal) {
     const current = book!;
     if (!current.pdf) throw new Error("Only PDFs can have contents generated.");
@@ -141,10 +148,16 @@ async function openBook(path: string) {
   };
 
   titleEl.textContent = book.title;
+  subtitleEl.hidden = true;
   document.title = `${book.title} — Agentic Reading`;
   panelWindow.setTitle(`Explanations — ${book.title}`);
+  void api.saveBookInfo(path, { title: book.title, kind: book.kind, pageCount });
   pageTotal.textContent = `/ ${pageCount}`;
   pageInput.max = String(pageCount);
+  pageInput.style.width = `${String(pageCount).length + 1}ch`;
+  pagePrefix.hidden = !epub;
+  tocFilter.value = "";
+  filterContents("");
   const unit = epub ? "Section" : "Page";
   pageInput.setAttribute("aria-label", `${unit} number`);
   pageInput.title = epub ? "Section of the book (usually a chapter)" : "";
@@ -154,6 +167,8 @@ async function openBook(path: string) {
   emptyEl.hidden = true;
   pagesEl.hidden = false;
   tocBtn.hidden = false;
+  homeBtn.hidden = false;
+  tbDivider.hidden = false;
   setTocVisible(tocPreference());
 
   const state = await api.bookState(path);
@@ -175,17 +190,173 @@ async function openBook(path: string) {
   }
 }
 
-async function showRecents() {
-  const recents = await api.recentBooks();
-  recentsEl.replaceChildren(
-    ...recents.map((p) => {
-      const b = document.createElement("button");
-      b.textContent = p.split("/").pop()!;
-      b.title = p;
-      b.onclick = () => openBook(p);
-      return b;
-    }),
-  );
+// ---------- Library ----------
+
+const svg = (paths: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
+const SPARK = svg('<path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1L5 10.5l5.1-1.9z" />');
+const UPLOAD = svg('<path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 15v3.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V15" />');
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text = ""): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text) e.textContent = text;
+  return e;
+}
+
+function bookName(b: LibraryBook): string {
+  return b.info?.title ?? b.path.split("/").pop()!.replace(BOOK_FILE, "");
+}
+
+function bookKind(b: LibraryBook): "pdf" | "epub" {
+  return b.info?.kind ?? (/\.epub$/i.test(b.path) ? "epub" : "pdf");
+}
+
+/** A cover made from the title, in one of the theme's four categorical colours, picked by the path so it stays put. */
+function cover(b: LibraryBook): HTMLElement {
+  let hash = 0;
+  for (const ch of b.path) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
+  const c = el("div", `cover c${(Math.abs(hash) % 4) + 1}`);
+  c.append(el("span", "cover-title", bookName(b)), el("span", "cover-kind", bookKind(b).toUpperCase()));
+  return c;
+}
+
+/** "Page 300 of 675", "§ 4 of 30", or nothing when the book hasn't been measured yet. */
+function whereIn(b: LibraryBook): string {
+  if (!b.info) return "";
+  return bookKind(b) === "epub" ? `§ ${b.page} of ${b.info.pageCount}` : `Page ${b.page} of ${b.info.pageCount}`;
+}
+
+function percentRead(b: LibraryBook): number | null {
+  if (!b.info || b.info.pageCount < 1) return null;
+  return Math.round((Math.min(b.page, b.info.pageCount) / b.info.pageCount) * 100);
+}
+
+function plural(n: number, word: string) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+function openedWhen(at?: number): string {
+  if (!at) return "";
+  const days = Math.floor((Date.now() - at) / 86_400_000);
+  if (days <= 0 && new Date(at).toDateString() === new Date().toDateString()) return "Opened today";
+  if (days <= 1) return "Opened yesterday";
+  if (days < 7) return `Opened ${days} days ago`;
+  return `Opened ${new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+function continueCard(b: LibraryBook): HTMLElement {
+  const box = el("div", "continue");
+  const info = el("div", "continue-info");
+  const meta = el("div", "continue-meta");
+  meta.append(el("span", "badge", bookKind(b).toUpperCase()));
+  const when = openedWhen(b.openedAt);
+  if (when) meta.append(el("span", "", when));
+  info.append(meta, el("h3", "", bookName(b)));
+
+  const pct = percentRead(b);
+  if (pct !== null) {
+    const progress = el("div", "continue-progress");
+    const label = el("div", "toc-progress");
+    label.append(el("span", "", whereIn(b)), el("span", "", `${pct}%`));
+    const bar = el("div", "progress");
+    const fill = el("div", "progress-fill");
+    fill.style.width = `${pct}%`;
+    bar.append(fill);
+    progress.append(label, bar);
+    info.append(progress);
+  }
+
+  const actions = el("div", "continue-actions");
+  const resume = el("button", "primary", "Resume reading");
+  resume.onclick = () => void openBook(b.path);
+  actions.append(resume);
+  if (b.explanationCount) {
+    const n = el("span");
+    n.innerHTML = SPARK;
+    n.append(plural(b.explanationCount, "explanation"));
+    actions.append(n);
+  }
+  info.append(actions);
+  box.append(cover(b), info);
+  return box;
+}
+
+function bookTile(b: LibraryBook): HTMLElement {
+  const tile = el("button", "book-tile");
+  tile.title = b.path;
+  tile.onclick = () => void openBook(b.path);
+  const meta = el("span", "book-tile-meta");
+  const pct = percentRead(b);
+  const parts = [
+    pct === null ? "" : pct >= 100 ? "Finished" : b.page <= 1 ? "Not started" : `${pct}%`,
+    b.explanationCount ? plural(b.explanationCount, "explanation") : "",
+  ].filter(Boolean);
+  meta.textContent = parts.join(" · ");
+  tile.append(cover(b), el("span", "book-tile-name", bookName(b)), meta);
+  return tile;
+}
+
+/** The home screen: the book you were last reading, the others you've opened, and how to add more. */
+async function showLibrary() {
+  const books = await api.library();
+  if (book) return;
+  const parts: HTMLElement[] = [];
+  if (!books.length) {
+    const welcome = el("div", "welcome");
+    const open = el("button", "primary", "Open a book");
+    open.onclick = () => $("open-btn").click();
+    welcome.append(
+      el("h1", "", "Open a book to start reading"),
+      el("p", "", "Select any passage and choose Explain for a few sentences, or Explain visually for a drawing."),
+      open,
+    );
+    parts.push(welcome);
+  } else {
+    const [latest, ...rest] = books;
+    const current = el("section");
+    current.append(el("h2", "", "Continue reading"), continueCard(latest));
+    parts.push(current);
+    if (rest.length) {
+      const recent = el("section");
+      const head = el("div", "library-section-head");
+      head.append(el("h2", "", "Recent"), el("span", "", plural(rest.length, "book")));
+      const shelf = el("div", "shelf");
+      shelf.append(...rest.map(bookTile));
+      recent.append(head, shelf);
+      parts.push(recent);
+    }
+  }
+  const drop = el("div", "dropzone");
+  drop.innerHTML = UPLOAD;
+  drop.append("Drop a PDF or EPUB anywhere in the window to open it");
+  parts.push(drop);
+  emptyEl.replaceChildren(...parts);
+}
+
+/** Puts the book away and goes back to the library. */
+async function closeBook() {
+  if (!book) return;
+  clearTimeout(savePageTimer);
+  await api.savePage(book.path, view.position());
+  hideMenu();
+  await book.pdf?.destroy();
+  book = null;
+  pages.clear();
+  epubView.clear();
+  pagesEl.replaceChildren();
+  pagesEl.hidden = true;
+  nav.hidden = true;
+  tocEl.hidden = true;
+  tocBtn.hidden = true;
+  homeBtn.hidden = true;
+  tbDivider.hidden = true;
+  titleEl.textContent = "Agentic Reading";
+  subtitleEl.hidden = true;
+  document.title = "Agentic Reading";
+  explanations.show("", []);
+  emptyEl.hidden = false;
+  viewer.scrollTop = 0;
+  await showLibrary();
 }
 
 // ---------- Page tracking ----------
@@ -197,6 +368,14 @@ function showPage(n: number) {
   if (!book) return;
   if (document.activeElement !== pageInput) pageInput.value = String(n);
   contents.setPage(n);
+  explanations.setPage(n);
+  const chapter = tocBody.querySelector(".toc-link.active > span:first-child")?.textContent ?? "";
+  subtitleEl.textContent = chapter;
+  subtitleEl.hidden = !chapter;
+  const pct = Math.round((n / book.pageCount) * 100);
+  progressLabel.textContent = book.kind === "epub" ? `Section ${n} of ${book.pageCount}` : `Page ${n} of ${book.pageCount}`;
+  progressPct.textContent = `${pct}%`;
+  progressBar.style.width = `${pct}%`;
   prevBtn.disabled = n <= 1;
   nextBtn.disabled = n >= book.pageCount;
   clearTimeout(savePageTimer);
@@ -259,6 +438,8 @@ function applyTheme(id: string | null) {
   const theme = themeById(id);
   document.documentElement.dataset.theme = theme.id;
   themeSelect.value = theme.id;
+  for (const tile of themeTiles.children) tile.setAttribute("aria-pressed", String((tile as HTMLElement).dataset.theme === theme.id));
+  $("theme-note").textContent = theme.darkOnly ? "Always dark" : "Follows your Mac";
   try {
     localStorage.setItem(THEME_KEY, theme.id);
   } catch {
@@ -270,6 +451,52 @@ function applyTheme(id: string | null) {
 
 themeSelect.append(...THEMES.map((t) => new Option(t.label, t.id)));
 themeSelect.onchange = () => applyTheme(themeSelect.value);
+
+/** One tile per theme, drawn in that theme's own colours for the scheme you'd see it in. */
+const themeTiles = $("theme-tiles");
+themeTiles.replaceChildren(
+  ...THEMES.map((t) => {
+    const p = t.darkOnly || darkSystem.matches ? t.dark : t.light;
+    const tile = el("button", "theme-tile");
+    tile.dataset.theme = t.id;
+    tile.setAttribute("aria-pressed", "false");
+    const swatch = el("span", "theme-swatch");
+    swatch.style.background = p.canvas;
+    const page = el("span", "theme-swatch-page");
+    page.style.background = p.bg;
+    for (const [w, c, o] of [["70%", p.text, 0.6], ["90%", p.text, 0.3], ["50%", p.accent, 1]] as const) {
+      const line = el("i");
+      Object.assign(line.style, { width: w, background: c, opacity: String(o) });
+      page.append(line);
+    }
+    const side = el("span", "theme-swatch-side");
+    side.style.background = p.accent;
+    swatch.append(page, side);
+    const label = el("span", "theme-label");
+    label.append(el("b", "", t.label), el("span", "", t.darkOnly ? "Always dark" : "Light or dark"));
+    tile.append(swatch, label);
+    tile.onclick = () => applyTheme(t.id);
+    return tile;
+  }),
+);
+
+// ---------- Settings popover ----------
+
+const settingsEl = $("settings");
+const settingsBtn = $<HTMLButtonElement>("settings-btn");
+
+function setSettingsOpen(open: boolean) {
+  settingsEl.hidden = !open;
+  settingsBtn.setAttribute("aria-expanded", String(open));
+  settingsBtn.setAttribute("aria-pressed", String(open));
+}
+settingsBtn.onclick = () => setSettingsOpen(settingsEl.hidden);
+document.addEventListener("mousedown", (e) => {
+  if (!settingsEl.hidden && !settingsEl.contains(e.target as Node) && !settingsBtn.contains(e.target as Node)) setSettingsOpen(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !settingsEl.hidden) setSettingsOpen(false);
+});
 
 // ---------- Contents sidebar ----------
 
@@ -294,6 +521,27 @@ function setTocVisible(visible: boolean) {
 }
 
 tocBtn.onclick = () => setTocVisible(tocEl.hidden);
+
+/** Hides contents entries that don't match, keeping the parents of those that do. */
+function filterContents(query: string) {
+  const q = query.trim().toLowerCase();
+  tocBody.classList.toggle("filtering", !!q);
+  const visit = (li: HTMLLIElement): boolean => {
+    const own = li.querySelector(":scope > .toc-row .toc-link")?.textContent?.toLowerCase() ?? "";
+    let match = !q || own.includes(q);
+    for (const child of li.querySelectorAll<HTMLLIElement>(":scope > ul > li")) if (visit(child)) match = true;
+    li.classList.toggle("filtered-out", !match);
+    return match;
+  };
+  for (const li of tocBody.querySelectorAll<HTMLLIElement>(":scope > ul > li")) visit(li);
+}
+tocFilter.oninput = () => filterContents(tocFilter.value);
+tocFilter.onkeydown = (e) => {
+  if (e.key === "Escape") {
+    tocFilter.value = "";
+    filterContents("");
+  }
+};
 
 // ---------- Selection ----------
 
@@ -381,7 +629,27 @@ async function surrounding(page: number, passage: string): Promise<string> {
 
 // ---------- Explanations ----------
 
-const explanations = new ExplanationCards(cardsEl, cardsEmpty, countEl, {
+const SCOPE_KEY = "visual-reader:card-scope";
+const scopeButtons: Record<CardScope, HTMLButtonElement> = { page: $("scope-page"), all: $("scope-all") };
+
+function showScope(scope: CardScope) {
+  for (const [s, b] of Object.entries(scopeButtons)) b.setAttribute("aria-selected", String(s === scope));
+  try {
+    localStorage.setItem(SCOPE_KEY, scope);
+  } catch {
+    // the choice just won't persist
+  }
+}
+
+function storedScope(): CardScope {
+  try {
+    return localStorage.getItem(SCOPE_KEY) === "all" ? "all" : "page";
+  } catch {
+    return "page";
+  }
+}
+
+const explanations = new ExplanationCards(cardsEl, cardsEmpty, { all: $("count"), page: $("count-page") }, {
   api,
   goTo: (page, passage) => goTo(page, { passage }),
   pageLabel: (page) =>
@@ -394,7 +662,11 @@ const explanations = new ExplanationCards(cardsEl, cardsEmpty, countEl, {
     if (panelWindow.place === "hidden") panelWindow.dock();
   },
   book: () => (book ? { path: book.path, title: book.title, pageCount: book.pageCount } : null),
-});
+  onScope: showScope,
+}, storedScope());
+showScope(storedScope());
+scopeButtons.page.onclick = () => explanations.setScope("page");
+scopeButtons.all.onclick = () => explanations.setScope("all");
 
 async function explainPassage(page: number, passage: string, mode: ExplainMode, question?: string) {
   if (!book) return;
@@ -444,6 +716,7 @@ $("open-btn").onclick = async () => {
   if (picked) await openBook(picked);
 };
 api.onOpenBook((path) => void openBook(path));
+homeBtn.onclick = () => void closeBook();
 
 prevBtn.onclick = () => goTo(view.current - 1);
 nextBtn.onclick = () => goTo(view.current + 1);
@@ -455,6 +728,7 @@ $("zoom-out").onclick = () => setZoom(view.zoomLevel - 0.25);
 modelSelect.onchange = () => {
   const [provider, ...rest] = modelSelect.value.split("/");
   void api.saveSettings({ provider, model: rest.join("/") });
+  showModel();
 };
 
 // Keep the selection alive when a menu button is pressed; the question box still takes focus.
@@ -555,6 +829,35 @@ async function loadModels() {
   );
   modelSelect.value = `${settings.provider}/${settings.model}`;
   if (modelSelect.selectedIndex < 0) modelSelect.selectedIndex = 0;
+
+  const list = $("model-list");
+  list.replaceChildren(
+    ...providers.flatMap((p) => {
+      const rows: HTMLElement[] = providers.length > 1 ? [el("div", "model-group", p.label)] : [];
+      for (const m of p.models) {
+        const row = el("button", "model-option");
+        row.setAttribute("role", "radio");
+        row.dataset.value = `${p.id}/${m.id}`;
+        row.append(el("span", "", m.label));
+        row.insertAdjacentHTML("beforeend", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>');
+        row.onclick = () => {
+          modelSelect.value = row.dataset.value!;
+          modelSelect.dispatchEvent(new Event("change"));
+        };
+        rows.push(row);
+      }
+      return rows;
+    }),
+  );
+  showModel();
+}
+
+/** Marks the chosen model in the settings list and names it under the selection menu. */
+function showModel() {
+  for (const row of $("model-list").querySelectorAll<HTMLElement>(".model-option")) {
+    row.setAttribute("aria-checked", String(row.dataset.value === modelSelect.value));
+  }
+  $("selection-model").textContent = modelSelect.selectedOptions[0]?.textContent ?? "";
 }
 void loadModels();
 applyTheme(storedTheme());
@@ -566,4 +869,4 @@ function storedTheme(): string | null {
     return null;
   }
 }
-void showRecents();
+void showLibrary();

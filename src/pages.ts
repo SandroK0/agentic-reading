@@ -154,7 +154,9 @@ export class Pages {
 
   private layout() {
     const first = this.slots[0];
-    const fit = Math.max(200, this.viewer.clientWidth - 48) / first.width;
+    const style = getComputedStyle(this.viewer);
+    const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+    const fit = Math.max(200, this.viewer.clientWidth - padding) / first.width;
     this.scale = Math.min(fit, MAX_FIT_SCALE) * this.zoom;
     for (const slot of this.slots) this.size(slot);
   }

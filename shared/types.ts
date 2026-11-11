@@ -84,9 +84,29 @@ export interface FollowUp {
 
 export interface BookState {
   page: number;
+  /** What the library shows for the book, saved when it's opened. */
+  info?: BookInfo;
+  /** When the book was last opened, in ms since the epoch. */
+  openedAt?: number;
   explanations: Explanation[];
   /** A table of contents written by the model, for PDFs that don't have one. */
   generatedContents?: GeneratedContents;
+}
+
+export interface BookInfo {
+  title: string;
+  kind: "pdf" | "epub";
+  /** Pages in a PDF, sections in an EPUB. */
+  pageCount: number;
+}
+
+/** A recent book as the library shows it. */
+export interface LibraryBook {
+  path: string;
+  info?: BookInfo;
+  page: number;
+  explanationCount: number;
+  openedAt?: number;
 }
 
 /** One line of a table of contents. `level` 1 is a chapter, 2 a section, 3 a subsection. */
@@ -124,6 +144,9 @@ export interface ReaderApi {
   pathForFile(file: File): string;
   readBook(path: string): Promise<Uint8Array>;
   recentBooks(): Promise<string[]>;
+  /** Recent books, most recent first, with what the library shows for each. */
+  library(): Promise<LibraryBook[]>;
+  saveBookInfo(path: string, info: BookInfo): Promise<void>;
   bookState(path: string): Promise<BookState>;
   savePage(path: string, page: number): Promise<void>;
   saveExplanation(path: string, explanation: Explanation): Promise<void>;

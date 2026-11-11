@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { BookState, Explanation, GeneratedContents, Settings } from "../shared/types";
+import type { BookInfo, BookState, Explanation, GeneratedContents, LibraryBook, Settings } from "../shared/types";
 
 /** Small JSON store in the app's userData folder: recents, pages, explainers. */
 
@@ -42,6 +42,19 @@ export class Store {
 
   touchRecent(bookPath: string) {
     this.state.recents = [bookPath, ...this.state.recents.filter((p) => p !== bookPath)].slice(0, MAX_RECENTS);
+    this.book(bookPath).openedAt = Date.now();
+    this.save();
+  }
+
+  library(): LibraryBook[] {
+    return this.recents().map((p) => {
+      const b = this.bookState(p);
+      return { path: p, info: b.info, page: b.page, explanationCount: b.explanations.length, openedAt: b.openedAt };
+    });
+  }
+
+  saveBookInfo(bookPath: string, info: BookInfo) {
+    this.book(bookPath).info = info;
     this.save();
   }
 

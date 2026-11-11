@@ -39,8 +39,18 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
   };
 
   try {
+    // The library comes first, before any book is open.
+    await waitFor(`!!document.querySelector("#empty > *")`, 10_000);
+    await shot("0-library");
     open(pdf);
     if (!(await waitFor(`document.getElementById("page-total").textContent !== "/ –"`, 30_000))) throw new Error("book never opened");
+    // Back to the library and into the book again: the library now knows the book's title and length.
+    await js(`document.getElementById("home-btn").click()`);
+    const library = await waitFor(`!!document.querySelector("#empty .continue h3") && !document.getElementById("empty").hidden`, 10_000);
+    console.log(`[selftest] library after closing: ok=${library}`);
+    await shot("0b-library-after");
+    await js(`document.querySelector("#empty .continue button.primary").click()`);
+    if (!(await waitFor(`document.getElementById("page-total").textContent !== "/ –" && !document.getElementById("pages").hidden`, 30_000))) throw new Error("book never reopened");
     if (/\.epub$/i.test(pdf)) return quit((await epubSelfTest(js, waitFor, shot)) ? 0 : 1);
 
     // README screenshots: two real explanations on the page, then the app in a few themes, saved to VR_SELFTEST_SCREENSHOTS.

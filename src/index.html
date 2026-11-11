@@ -8,78 +8,137 @@
 </head>
 <body>
   <header class="toolbar">
-    <button id="open-btn" title="Open a PDF or EPUB (⌘O)">Open</button>
-    <button id="toc-btn" title="Show or hide the table of contents" aria-pressed="true" hidden>Contents</button>
-    <span class="title" id="title">Agentic Reading</span>
-    <div class="nav" id="nav" hidden>
-      <button id="prev" aria-label="Previous page">‹</button>
-      <input id="page-input" type="number" min="1" value="1" aria-label="Page number">
-      <span id="page-total" class="muted">/ –</span>
-      <button id="next" aria-label="Next page">›</button>
-      <span class="gap"></span>
-      <button id="zoom-out" aria-label="Zoom out">−</button>
-      <span id="zoom-label" class="muted">100%</span>
-      <button id="zoom-in" aria-label="Zoom in">+</button>
+    <div class="tb-group">
+      <button class="icon-btn" id="home-btn" title="Library" aria-label="Library" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h3v16H5zM10 4h3v16h-3zM15.5 5.2l2.9-.8 3.6 14.6-2.9.7z" /></svg>
+      </button>
+      <button class="icon-btn" id="toc-btn" title="Show or hide the contents" aria-label="Contents" aria-pressed="true" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9.5 4.5v15" /></svg>
+      </button>
+      <span class="tb-divider" id="tb-divider" hidden></span>
+      <button class="tb-text-btn" id="open-btn" title="Open a PDF or EPUB (⌘O)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        Open
+      </button>
     </div>
-    <label class="theme">
-      <span class="muted">Theme</span>
-      <select id="theme"></select>
-    </label>
-    <label class="model">
-      <span class="muted">Model</span>
-      <select id="model"></select>
-    </label>
-    <button id="panel-btn" title="Show or hide the explanations" aria-pressed="true">Explanations</button>
+
+    <div class="tb-title">
+      <span class="title" id="title">Agentic Reading</span>
+      <span class="subtitle" id="subtitle" hidden></span>
+    </div>
+
+    <div class="tb-group">
+      <div class="popover-anchor">
+        <button class="icon-btn" id="settings-btn" title="Theme and model" aria-label="Theme and model" aria-haspopup="dialog" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>
+        </button>
+        <div class="popover settings" id="settings" role="dialog" aria-label="Theme and model" hidden>
+          <section>
+            <div class="popover-head"><h2>Theme</h2><span id="theme-note"></span></div>
+            <div class="theme-tiles" id="theme-tiles"></div>
+            <select id="theme" hidden></select>
+          </section>
+          <section>
+            <div class="popover-head"><h2>Model</h2></div>
+            <div class="model-list" id="model-list" role="radiogroup" aria-label="Model"></div>
+            <select id="model" hidden></select>
+          </section>
+          <div class="popover-foot">Drawings in explanations follow the theme too.</div>
+        </div>
+      </div>
+      <button class="icon-btn" id="panel-btn" title="Show or hide the explanations" aria-label="Explanations" aria-pressed="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M14.5 4.5v15" /></svg>
+      </button>
+    </div>
   </header>
 
   <main class="layout">
     <nav class="toc" id="toc" aria-label="Contents" hidden>
-      <div class="toc-head">Contents</div>
+      <div class="toc-head">
+        <span>Contents</span>
+      </div>
+      <label class="toc-filter">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></svg>
+        <input id="toc-filter" type="search" placeholder="Filter chapters" aria-label="Filter chapters" autocomplete="off" spellcheck="false">
+      </label>
       <div class="toc-body" id="toc-body"></div>
+      <div class="toc-foot">
+        <div class="toc-progress"><span id="progress-label"></span><span id="progress-pct"></span></div>
+        <div class="progress"><div class="progress-fill" id="progress-bar"></div></div>
+      </div>
     </nav>
     <div class="resizer" id="toc-resizer" aria-label="Resize contents" title="Drag to resize, double-click to reset"></div>
 
-    <section class="viewer" id="viewer">
-      <div class="empty" id="empty">
-        <h1>Open a book to start reading</h1>
-        <p class="muted">Drop a PDF or EPUB here or press ⌘O. Select any passage and choose <b>Explain</b> or <b>Explain visually</b>.</p>
-        <div class="recents" id="recents"></div>
-      </div>
-      <div class="pages" id="pages" hidden></div>
-      <div class="selection-menu" id="selection-menu" role="toolbar" aria-label="Selected text" hidden>
-        <input id="selection-question" type="text" autocomplete="off" spellcheck="false"
-               placeholder="Ask something specific (optional)" aria-label="Question about the selected text"
-               title="Leave empty for a general explanation. Enter explains, Esc closes.">
-        <div class="selection-menu-actions">
-        <button id="explain-text" title="Short written explanation (E)">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h10M3 12h6" /></svg>
-          Explain
-        </button>
-        <span class="selection-menu-divider" aria-hidden="true"></span>
-        <button id="explain-visual" title="Explain with a drawing (V)">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" /><circle cx="11.25" cy="4.75" r="2.25" /><path d="M2.5 13.5 5 9.5l2.5 4zM9 10.5h4.5M9 13h3" /></svg>
-          Explain visually
-        </button>
+    <section class="reader-area">
+      <div class="viewer" id="viewer">
+        <div class="library" id="empty"></div>
+        <div class="pages" id="pages" hidden></div>
+        <div class="selection-menu" id="selection-menu" role="toolbar" aria-label="Selected text" hidden>
+          <label class="selection-ask">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1L5 10.5l5.1-1.9z" /></svg>
+            <input id="selection-question" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="Ask about this passage (optional)" aria-label="Question about the selected text"
+                   title="Leave empty for a general explanation. Enter explains, Esc closes.">
+          </label>
+          <div class="selection-menu-actions">
+            <button id="explain-text" class="primary" title="Short written explanation (E)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" /></svg>
+              Explain <kbd>E</kbd>
+            </button>
+            <button id="explain-visual" title="Explain with a drawing (V)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="7" height="6" rx="1.5" /><rect x="13.5" y="13.5" width="7" height="6" rx="1.5" /><path d="M7 10.5v3a3 3 0 0 0 3 3h3.5" /></svg>
+              Explain visually <kbd>V</kbd>
+            </button>
+          </div>
+          <div class="selection-foot"><span id="selection-model"></span><span>Esc to close</span></div>
         </div>
+      </div>
+
+      <div class="pagebar" id="nav" role="toolbar" aria-label="Page and zoom" hidden>
+        <button id="prev" aria-label="Previous page">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6l-6 6 6 6" /></svg>
+        </button>
+        <label class="pagebar-page">
+          <span id="page-prefix" hidden>§</span>
+          <input id="page-input" type="number" min="1" value="1" aria-label="Page number">
+          <span id="page-total">/ –</span>
+        </label>
+        <button id="next" aria-label="Next page">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6" /></svg>
+        </button>
+        <span class="pagebar-sep" aria-hidden="true"></span>
+        <button id="zoom-out" aria-label="Zoom out">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" /></svg>
+        </button>
+        <span id="zoom-label">100%</span>
+        <button id="zoom-in" aria-label="Zoom in">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12" /></svg>
+        </button>
       </div>
     </section>
 
     <div class="resizer" id="panel-resizer" aria-label="Resize explanations" title="Drag to resize, double-click to reset"></div>
     <aside class="panel" id="panel">
-      <div class="panel-head">
-        <span class="panel-title">Explanations <span class="muted" id="count"></span></span>
-        <button class="icon-btn" id="panel-collapse-all" title="Minimise or expand all" aria-label="Minimise or expand all explanations">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3.5 8 6.5l3.5-3M4.5 12.5 8 9.5l3.5 3" /></svg>
-        </button>
-        <button class="icon-btn" id="panel-popout" title="Open in a new window" aria-label="Open in a new window">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path class="when-docked" d="M9.5 2.5h4v4M13.5 2.5 8 8M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" /><path class="when-window" d="M8 8V3.5M8 8H3.5M8 8 2.5 2.5M4 9.5v3a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1h-3" /></svg>
-        </button>
-        <button class="icon-btn" id="panel-close" title="Hide the explanations" aria-label="Hide the explanations">
-          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
-        </button>
+      <div class="panel-top">
+        <div class="panel-head">
+          <span class="panel-title">Explanations</span>
+          <button class="icon-btn" id="panel-collapse-all" title="Minimise or expand all" aria-label="Minimise or expand all explanations">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l5 4 5-4M7 19l5-4 5 4" /></svg>
+          </button>
+          <button class="icon-btn" id="panel-popout" title="Open in a new window" aria-label="Open in a new window">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path class="when-docked" d="M14 4.5h5.5V10M19.5 4.5L12 12M10 5.5H6A1.5 1.5 0 0 0 4.5 7v11A1.5 1.5 0 0 0 6 19.5h11a1.5 1.5 0 0 0 1.5-1.5v-4" /><path class="when-window" d="M12 12V6.5M12 12H6.5M12 12 4.5 4.5M6 14v4a1.5 1.5 0 0 0 1.5 1.5H18a1.5 1.5 0 0 0 1.5-1.5V7.5A1.5 1.5 0 0 0 18 6h-4" /></svg>
+          </button>
+          <button class="icon-btn" id="panel-close" title="Hide the explanations" aria-label="Hide the explanations">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>
+          </button>
+        </div>
+        <div class="segmented" role="tablist" aria-label="Which explanations">
+          <button role="tab" id="scope-page" aria-selected="true">This page <span class="seg-count" id="count-page"></span></button>
+          <button role="tab" id="scope-all" aria-selected="false">All <span class="seg-count" id="count"></span></button>
+        </div>
       </div>
       <div class="cards" id="cards">
-        <p class="muted hint" id="cards-empty">Your explainers for this book will collect here.</p>
+        <p class="muted hint" id="cards-empty">Select a passage in the book and choose Explain. Your explanations collect here.</p>
       </div>
     </aside>
   </main>

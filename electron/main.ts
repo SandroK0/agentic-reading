@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from 
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ContentsSource, ExplainEvent, ExplainRequest, Explanation, Settings } from "../shared/types";
+import type { BookInfo, ContentsSource, ExplainEvent, ExplainRequest, Explanation, Settings } from "../shared/types";
 import { ContentsGenerator } from "./contents";
 import { Explainer } from "./explainer";
 import { createProviders } from "./llm";
@@ -206,6 +206,11 @@ function registerIpc() {
     return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   });
   ipcMain.handle("book:recents", () => store.recents());
+  ipcMain.handle("book:library", () => store.library());
+  ipcMain.handle("book:save-info", (_e, bookPath: string, info: BookInfo) => {
+    if (!info || typeof info.title !== "string" || (info.kind !== "pdf" && info.kind !== "epub") || !Number.isInteger(info.pageCount)) return;
+    store.saveBookInfo(assertBook(bookPath), { title: info.title.slice(0, 300), kind: info.kind, pageCount: info.pageCount });
+  });
   ipcMain.handle("book:state", (_e, bookPath: string) => store.bookState(assertBook(bookPath)));
   ipcMain.handle("book:save-page", (_e, bookPath: string, page: number) => store.savePage(assertBook(bookPath), page));
   ipcMain.handle("explanation:save", (_e, bookPath: string, explanation: Explanation) => {
