@@ -141,7 +141,7 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
       })`);
       console.log(`[selftest] toc ${saved ? "loaded from save" : "generated"} in ${Math.round((Date.now() - started) / 1000)}s: ${JSON.stringify(result)}`);
       const jump = await js<{ title: string; target: string } | null>(`(() => {
-        const links = [...document.querySelectorAll(".toc-link")].filter((l) => !l.disabled);
+        const links = [...document.querySelectorAll(".toc-link:not(.branch)")].filter((l) => !l.disabled);
         const link = links[Math.floor(links.length / 2)];
         if (!link) return null;
         link.click();
@@ -166,6 +166,44 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
       activeVisible: !!document.querySelector(".toc-link.active")?.offsetParent,
     })`);
     console.log("[selftest] contents:", JSON.stringify(toc));
+    // A branch's arrow opens and closes it, by real clicks.
+    const twisty = await js<{ x: number; y: number } | null>(`(() => {
+      const t = document.querySelector(".toc-link.active").closest("ul").closest("li").querySelector(":scope > .toc-row > .toc-twisty");
+      t.id = "selftest-twisty";
+      if (!t) return null;
+      t.scrollIntoView({ block: "center" });
+      const r = t.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`);
+    if (twisty) {
+      const state = () => js<boolean>(`document.getElementById("selftest-twisty").closest("li").classList.contains("open")`);
+      const click = async () => {
+        for (const type of ["mouseDown", "mouseUp"] as const) {
+          win.webContents.sendInputEvent({ type, x: Math.round(twisty.x), y: Math.round(twisty.y), button: "left", clickCount: 1 });
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      };
+      const before = await state();
+      await click();
+      const once = await state();
+      await click();
+      const twice = await state();
+      console.log(`[selftest] contents arrow toggles: ok=${once !== before && twice === before}`, JSON.stringify({ before, once, twice }));
+      // The section's own row toggles it too, and its page number still jumps there.
+      const row = await js<{ toggles: boolean; jumped: string | null }>(`(async () => {
+        const li = document.getElementById("selftest-twisty").closest("li");
+        const link = li.querySelector(":scope > .toc-row > .toc-link");
+        const before = li.classList.contains("open");
+        link.click();
+        const toggles = li.classList.contains("open") !== before;
+        link.click();
+        const go = li.querySelector(":scope > .toc-row > .toc-page-btn");
+        go?.click();
+        await new Promise((r) => setTimeout(r, 1000));
+        return { toggles, jumped: go ? document.getElementById("page-input").value + " of " + go.textContent : null };
+      })()`);
+      console.log(`[selftest] contents row toggles: ok=${row.toggles}`, JSON.stringify(row));
+    }
     const jumped = await js<{ clicked: string | null; page: string }>(`(() => {
       const link = [...document.querySelectorAll(".toc-link")].find((l) => /segmentation/i.test(l.textContent) && !l.disabled);
       if (!link) return { clicked: null, page: "" };
@@ -550,9 +588,18 @@ async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promi
   console.log("[selftest] epub opened:", JSON.stringify(opened));
   await shot("epub-1-open");
 
+  // The checks below scroll, so start in the scrolling layout, picked from the Aa menu.
+  const pickLayout = (label: string) => js(`(() => {
+    document.getElementById("look-btn").click();
+    document.querySelector('.look-layout[title="${label}"]').click();
+    document.getElementById("look-btn").click();
+  })()`);
+  await pickLayout("Scroll");
+  await pause(500);
+
   // A contents entry lands on its section and lights up.
   const jump = await js<{ title: string; target: string } | null>(`(() => {
-    const links = [...document.querySelectorAll(".toc-link:not(:disabled)")];
+    const links = [...document.querySelectorAll(".toc-link:not(:disabled):not(.branch)")];
     const link = links[Math.min(3, links.length - 1)];
     if (!link) return null;
     link.click();
@@ -563,6 +610,27 @@ async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promi
   const jumpOk = !!jump && jump.target === landed.page && landed.active === jump.title;
   console.log(`[selftest] epub contents jump ok=${jumpOk}`, JSON.stringify({ ...jump, ...landed }));
   await shot("epub-2-jump");
+
+  // EPUB contents are a dropdown over the text: closed at first, open from its button, closed again by a jump.
+  const dropdown = await js<{ closedAtStart: boolean; floats: boolean; fullWidth: boolean; closedAfterJump: boolean; page: string }>(`(async () => {
+    const toc = document.getElementById("toc");
+    const closedAtStart = toc.hidden;
+    const before = document.getElementById("viewer").clientWidth;
+    document.getElementById("toc-btn").click();
+    await new Promise((r) => setTimeout(r, 300));
+    const floats = !toc.hidden && getComputedStyle(toc).position === "absolute";
+    const fullWidth = document.getElementById("viewer").clientWidth === before;
+    const links = [...document.querySelectorAll(".toc-link:not(:disabled):not(.branch)")];
+    const link = links[Math.min(5, links.length - 1)];
+    return { closedAtStart, floats, fullWidth, closedAfterJump: false, page: link.querySelector(".toc-page").textContent };
+  })()`);
+  await shot("epub-2b-contents-dropdown");
+  await js(`(() => { const links = [...document.querySelectorAll(".toc-link:not(:disabled):not(.branch)")]; links[Math.min(5, links.length - 1)].click(); })()`);
+  await pause(500);
+  dropdown.closedAfterJump = await js<boolean>(`document.getElementById("toc").hidden`);
+  const landedPage = await js<string>(`document.getElementById("page-input").value`);
+  const dropdownOk = dropdown.closedAtStart && dropdown.floats && dropdown.fullWidth && dropdown.closedAfterJump && landedPage === dropdown.page;
+  console.log(`[selftest] epub contents dropdown ok=${dropdownOk}`, JSON.stringify({ ...dropdown, landedPage }));
 
   // Scrolling moves the section number on; zooming keeps the same text at the top.
   await js(`document.getElementById("viewer").scrollTop += document.getElementById("viewer").clientHeight * 3`);
@@ -582,18 +650,22 @@ async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promi
   await shot("epub-3-zoomed");
   await js(`document.getElementById("zoom-out").click()`);
 
-  // Select a paragraph the way a mouse would, and check the menu comes up.
-  const selected = await js<{ text: string; section: string } | null>(`(() => {
+  // Select from the middle of the longest paragraph to its end, the way a mouse would, and check the menu comes up.
+  // Starting mid-paragraph lets the paginated card jump below check it lands on the passage, not the paragraph.
+  const selected = await js<{ text: string; paragraph: string; offset: number; section: string } | null>(`(() => {
     const sheet = document.querySelectorAll(".epub-section")[${jump?.target ?? 1} - 1];
-    const p = [...sheet.querySelectorAll("p")].find((p) => p.textContent.trim().length > 120);
-    if (!p) return null;
+    const p = [...sheet.querySelectorAll("p")].sort((a, b) => b.textContent.length - a.textContent.length)[0];
+    const node = p && [...p.childNodes].find((n) => n.nodeType === 3 && n.textContent.length > 200);
+    if (!node) return null;
     p.scrollIntoView({ block: "center" });
+    const offset = node.textContent.indexOf(" ", Math.floor(node.textContent.length / 2)) + 1;
     const range = document.createRange();
-    range.selectNodeContents(p);
+    range.setStart(node, offset);
+    range.setEnd(p, p.childNodes.length);
     getSelection().removeAllRanges();
     getSelection().addRange(range);
     document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    return { text: p.textContent.trim().slice(0, 60), section: sheet.dataset.page };
+    return { text: range.toString().trim().slice(0, 60), paragraph: p.textContent.trim().slice(0, 60), offset, section: sheet.dataset.page };
   })()`);
   await pause(300);
   const menu = await js<boolean>(`!document.getElementById("selection-menu").hidden`);
@@ -601,7 +673,8 @@ async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promi
   await shot("epub-4-selected");
   if (!selected || !menu) return false;
 
-  if (process.env.VR_SELFTEST_NO_EXPLAIN) return jumpOk && zoomOk && opened.sections > 0 && opened.brokenImages === 0;
+  // The paginated checks change layout, which clears the selection, so they run after Explain (or instead of it).
+  if (process.env.VR_SELFTEST_NO_EXPLAIN) return (await epubPagedTest(js, pause, shot, pickLayout)) && dropdownOk && jumpOk && zoomOk && opened.sections > 0 && opened.brokenImages === 0;
 
   await js(`document.getElementById("explain-text").click()`);
   const done = await waitFor(`!!document.querySelector(".card .followup:not([hidden])") || !!document.querySelector(".card .status.error")`, 180_000);
@@ -612,18 +685,174 @@ async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promi
   })`);
   console.log(`[selftest] epub explain finished=${done}`, JSON.stringify(card));
 
-  // The card's link goes back to the passage, even from far away.
+  // The card's link goes back to the passage itself (not just its paragraph), even from far away.
   await js(`document.getElementById("viewer").scrollTop = 0`);
   await pause(300);
   await js(`document.querySelector(".card .page-link").click()`);
   await pause(500);
   const back = await js<{ page: string; visible: boolean }>(`(() => {
     const v = document.getElementById("viewer").getBoundingClientRect();
-    const p = [...document.querySelectorAll(".epub-section p")].find((p) => p.textContent.trim().startsWith(${JSON.stringify(selected.text)}));
-    const r = p?.getBoundingClientRect();
-    return { page: document.getElementById("page-input").value, visible: !!r && r.top >= v.top - 1 && r.top < v.bottom };
+    const p = [...document.querySelectorAll(".epub-section p")].find((p) => p.textContent.trim().startsWith(${JSON.stringify(selected.paragraph)}));
+    const node = p && [...p.childNodes].find((n) => n.nodeType === 3 && n.textContent.length > 200);
+    if (!node) return { page: document.getElementById("page-input").value, visible: false };
+    const at = document.createRange(); at.setStart(node, ${selected.offset}); at.setEnd(node, ${selected.offset} + 1);
+    const r = at.getBoundingClientRect();
+    return { page: document.getElementById("page-input").value, visible: r.top >= v.top - 1 && r.top < v.bottom };
   })()`);
   console.log("[selftest] epub card jump:", JSON.stringify(back));
   await shot("epub-5-explained");
-  return done && !card.error && back.page === selected.section && back.visible && jumpOk && zoomOk;
+
+  // Paginated, at a size where long paragraphs run across pages, the card lands on the page with the passage itself.
+  await pickLayout("Single");
+  await js(`(() => { for (let i = 0; i < 10; i++) document.getElementById("look-larger").click(); })()`);
+  await pause(600);
+  await js(`(() => { const i = document.getElementById("page-input"); i.value = "1"; i.dispatchEvent(new Event("change")); })()`);
+  await pause(400);
+  await js(`document.querySelector(".card .page-link").click()`);
+  await pause(700);
+  const pagedBack = await js<{ page: string; passageShown: boolean; paragraphStartShown: boolean }>(`(() => {
+    const box = document.getElementById("pages").getBoundingClientRect();
+    const shown = (r) => r.width > 0 && r.left >= box.left - 1 && r.right <= box.right + 1;
+    const p = [...document.querySelectorAll(".epub-section.current p")].find((p) => p.textContent.trim().startsWith(${JSON.stringify(selected.paragraph)}));
+    const node = p && [...p.childNodes].find((n) => n.nodeType === 3 && n.textContent.length > 200);
+    if (!node) return { page: document.getElementById("page-input").value, passageShown: false, paragraphStartShown: false };
+    const at = document.createRange(); at.setStart(node, ${selected.offset}); at.setEnd(node, ${selected.offset} + 1);
+    const first = document.createRange(); first.setStart(node, 0); first.setEnd(node, 1);
+    return { page: document.getElementById("page-input").value, passageShown: shown(at.getBoundingClientRect()), paragraphStartShown: shown(first.getBoundingClientRect()) };
+  })()`);
+  await shot("epub-5b-explained-paged");
+  await js(`(() => { for (let i = 0; i < 10; i++) document.getElementById("look-smaller").click(); })()`);
+  await pickLayout("Scroll");
+  const pagedJumpOk = pagedBack.page === selected.section && pagedBack.passageShown;
+  console.log(`[selftest] epub paginated card jump ok=${pagedJumpOk}`, JSON.stringify(pagedBack));
+  const pagedOk = await epubPagedTest(js, pause, shot, pickLayout);
+  return done && !card.error && back.page === selected.section && back.visible && jumpOk && zoomOk && pagedOk && dropdownOk && pagedJumpOk;
+}
+
+/**
+ * Two pages, then one: columns, page turns by key and edge, crossing into the
+ * next section and back onto its last page, bigger text adding pages, and the
+ * Sepia page colour.
+ */
+async function epubPagedTest(js: Js, pause: (ms: number) => Promise<unknown>, shot: (name: string) => Promise<void>, pickLayout: (label: string) => Promise<unknown>) {
+  const state = `(() => {
+    const s = document.querySelector(".epub-section.current");
+    return {
+      paged: document.getElementById("viewer").classList.contains("epub-paged"),
+      section: document.getElementById("page-input").value,
+      columns: s ? getComputedStyle(s).columnCount : null,
+      shift: s ? Math.round(new DOMMatrix(getComputedStyle(s).transform).m41) : null,
+      turnsShown: !document.getElementById("turn-next").hidden,
+      scrollable: document.getElementById("viewer").scrollHeight > document.getElementById("viewer").clientHeight + 4,
+      menu: !document.getElementById("selection-menu").hidden,
+    };
+  })()`;
+  type State = { paged: boolean; section: string; columns: string | null; shift: number | null; turnsShown: boolean; scrollable: boolean; menu: boolean };
+  const key = (k: string, shiftKey = false) => js(`document.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, shiftKey: ${shiftKey}, bubbles: true }))`);
+
+  // Two pages need a wide reader: hide the explanations while checking them.
+  await js(`document.getElementById("panel-btn").click()`);
+  await pickLayout("Two pages");
+  await pause(600);
+  // Start from the top of a long section: the contents' fourth entry, as in the jump check.
+  await js(`(() => { const i = document.getElementById("page-input"); i.value = String(Math.min(4, Number(document.getElementById("page-total").textContent.split("/")[1]))); i.dispatchEvent(new Event("change")); })()`);
+  await pause(400);
+  const start = await js<State>(state);
+  await shot("epub-6-two-pages");
+  await key("ArrowRight");
+  await pause(600);
+  const turned = await js<State>(state);
+  await shot("epub-7-turned");
+  await js(`document.getElementById("turn-prev").click()`);
+  await pause(600);
+  const back = await js<State>(state);
+  const twoOk = start.paged && start.columns === "2" && start.turnsShown && !start.scrollable
+    && (turned.shift! < start.shift! || Number(turned.section) === Number(start.section) + 1)
+    && back.section === start.section && back.shift === start.shift;
+  console.log(`[selftest] epub two pages ok=${twoOk}`, JSON.stringify({ start, turned, back }));
+
+  // Space after closing the Aa menu with its button turns the page instead of reopening the menu.
+  await js(`(() => { const b = document.getElementById("look-btn"); b.click(); b.click(); b.focus(); })()`);
+  await js(`document.getElementById("look-btn").dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }))`);
+  await pause(600);
+  const spaced = await js<State & { menuOpen: boolean }>(`({ ...${state}, menuOpen: !document.getElementById("look").hidden })`);
+  await key(" ", true);
+  await pause(600);
+  const spaceOk = !spaced.menuOpen && (spaced.shift! < start.shift! || spaced.section !== start.section);
+  console.log(`[selftest] epub space with a toolbar button focused ok=${spaceOk}`, JSON.stringify(spaced));
+
+  // Turn until the section changes, then one back lands on the previous section's last page.
+  let crossed: State = start;
+  for (let i = 0; i < 60; i++) {
+    await key(" ");
+    await pause(80);
+    crossed = await js<State>(state);
+    if (crossed.section !== start.section) break;
+  }
+  await pause(400);
+  await key(" ", true);
+  await pause(600);
+  const lastPage = await js<State>(state);
+  const crossOk = Number(crossed.section) === Number(start.section) + 1 && crossed.shift === 0 && lastPage.section === start.section && lastPage.shift! <= 0;
+  console.log(`[selftest] epub across sections ok=${crossOk}`, JSON.stringify({ crossed, lastPage }));
+
+  // Single page, bigger text: same section, one column, and its pages move further apart.
+  await js(`document.getElementById("panel-btn").click()`);
+  await pickLayout("Single");
+  await pause(600);
+  const single = await js<State>(state);
+  await js(`document.getElementById("look-larger").click(); document.getElementById("look-larger").click()`);
+  await pause(600);
+  const bigger = await js<State & { size: string; label: string }>(`({ ...${state}, size: getComputedStyle(document.querySelector(".epub-section.current")).fontSize, label: document.getElementById("look-size-label").textContent })`);
+  await js(`document.querySelector('.look-color[title="Sepia page"]').click()`);
+  await pause(300);
+  const sepia = await js<string>(`getComputedStyle(document.getElementById("viewer")).backgroundColor`);
+  await shot("epub-8-single-sepia");
+  await js(`document.getElementById("look-smaller").click(); document.getElementById("look-smaller").click(); document.querySelector('.look-color[title="Theme page"]').click()`);
+  const singleOk = single.paged && single.columns === "1" && single.section === lastPage.section && bigger.label === "120%" && bigger.section === single.section && sepia === "rgb(246, 238, 220)";
+  console.log(`[selftest] epub single page, size and colour ok=${singleOk}`, JSON.stringify({ single, bigger, sepia }));
+  // Width: in Single and Scroll the slider makes the text wider and keeps your section; Two pages hides it.
+  const setWidth = (v: number) => js(`(() => { const r = document.getElementById("look-width"); r.value = "${v}"; r.dispatchEvent(new Event("input")); r.dispatchEvent(new Event("change")); })()`);
+  const widths = async () => js<{ box: number; section: string; sliderShown: boolean }>(`({
+    box: document.getElementById("pages").getBoundingClientRect().width,
+    section: document.getElementById("page-input").value,
+    sliderShown: !document.getElementById("look-width-row").hidden,
+  })`);
+  await pickLayout("Single");
+  await pause(400);
+  const singleBefore = await widths();
+  await setWidth(24);
+  await pause(400);
+  const singleNarrow = await widths();
+  await setWidth(32);
+  await pickLayout("Scroll");
+  await pause(400);
+  const scrollBefore = await widths();
+  await setWidth(50);
+  await pause(400);
+  const scrollWide = await widths();
+  await setWidth(32);
+  await pickLayout("Two pages");
+  await pause(400);
+  const twoHidesSlider = !(await widths()).sliderShown;
+  const widthOk = singleBefore.sliderShown && singleNarrow.box < singleBefore.box - 50 && singleNarrow.section === singleBefore.section
+    && scrollWide.box > scrollBefore.box + 50 && twoHidesSlider;
+  console.log(`[selftest] epub width ok=${widthOk}`, JSON.stringify({ singleBefore, singleNarrow, scrollBefore, scrollWide, twoHidesSlider }));
+
+  // The app theme never changes the book's font: Graphite & Violet's sans-serif stays in the interface.
+  const fontIn = (theme: string) => js<string>(`(() => {
+    const s = document.getElementById("theme"); s.value = "${theme}"; s.dispatchEvent(new Event("change"));
+    return getComputedStyle(document.querySelector(".epub-section.current")).fontFamily;
+  })()`);
+  const inkFont = await fontIn("ink");
+  const graphiteFont = await fontIn("graphite");
+  await fontIn("ink");
+  const fontOk = inkFont === graphiteFont && /New York/.test(inkFont);
+  console.log(`[selftest] epub font ignores app theme ok=${fontOk}`, JSON.stringify({ inkFont, graphiteFont }));
+
+  await js(`document.getElementById("look-btn").click()`);
+  await pause(300);
+  await shot("epub-9-look-menu");
+  await js(`document.getElementById("look-btn").click()`);
+  return twoOk && spaceOk && crossOk && singleOk && fontOk && widthOk;
 }

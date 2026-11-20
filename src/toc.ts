@@ -181,15 +181,31 @@ export class Contents {
       link.className = "toc-link";
       const title = document.createElement("span");
       title.textContent = node.title.trim() || "Untitled";
-      const pageLabel = document.createElement("span");
-      pageLabel.className = "toc-page";
-      pageLabel.textContent = node.page ? String(node.page) : "";
-      link.append(title, pageLabel);
+      link.append(title);
       link.title = node.title.trim();
       const { page, anchor } = node;
-      if (page) link.onclick = () => this.go(page, anchor);
-      else link.disabled = true;
+      const toggle = () => setOpen(li, !li.classList.contains("open"));
       row.append(twisty, link);
+      if (node.items.length) {
+        // A section with sub-entries opens and closes from anywhere on its row; its page number still jumps there.
+        link.classList.add("branch");
+        link.onclick = toggle;
+        if (page) {
+          const go = document.createElement("button");
+          go.className = "toc-page toc-page-btn";
+          go.textContent = String(page);
+          go.title = `Go to ${title.textContent}`;
+          go.onclick = () => this.go(page, anchor);
+          row.append(go);
+        }
+      } else {
+        const pageLabel = document.createElement("span");
+        pageLabel.className = "toc-page";
+        pageLabel.textContent = page ? String(page) : "";
+        link.append(pageLabel);
+        if (page) link.onclick = () => this.go(page, anchor);
+        else link.disabled = true;
+      }
       li.append(row);
 
       const branches = node.items.length ? [...parents, li] : parents;
@@ -197,8 +213,9 @@ export class Contents {
 
       if (node.items.length) {
         li.append(this.list(node.items, branches, false));
-        twisty.setAttribute("aria-label", `Expand ${title.textContent}`);
-        twisty.onclick = () => setOpen(li, !li.classList.contains("open"));
+        twisty.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6" /></svg>';
+        twisty.setAttribute("aria-label", title.textContent ?? "Section");
+        twisty.onclick = toggle;
         setOpen(li, open);
       } else {
         twisty.classList.add("leaf");
@@ -230,8 +247,8 @@ function setOpen(li: HTMLLIElement, open: boolean) {
   if (!child || !twisty) return;
   li.classList.toggle("open", open);
   child.hidden = !open;
-  twisty.textContent = open ? "▾" : "▸";
   twisty.setAttribute("aria-expanded", String(open));
+  twisty.title = open ? "Collapse" : "Expand";
 }
 
 /** Turns a flat, levelled list into a tree: each entry nests under the nearest shallower one before it. */

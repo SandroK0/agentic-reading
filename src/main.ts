@@ -10,6 +10,8 @@ import { enableTextSelection } from "./selection";
 import { collectContentsSource } from "./contents-source";
 import { Contents, pdfOutline } from "./toc";
 import { EpubView, parseEpub } from "./epub";
+import { setupReadingLook } from "./reading-look";
+import { closeWhenDismissed } from "./popover";
 import "./style.css";
 
 declare global {
@@ -51,8 +53,12 @@ const cardsEl = $("cards");
 const cardsEmpty = $("cards-empty");
 const emptyEl = $("empty");
 const tocEl = $("toc");
+const layoutEl = tocEl.closest<HTMLElement>(".layout")!;
 const tocBtn = $<HTMLButtonElement>("toc-btn");
-const contents = new Contents(tocBody, (page, anchor) => goTo(page, { anchor }), {
+const contents = new Contents(tocBody, (page, anchor) => {
+  goTo(page, { anchor });
+  if (tocIsDropdown()) setTocVisible(false);
+}, {
   async generate(onProgress, signal) {
     const current = book!;
     if (!current.pdf) throw new Error("Only PDFs can have contents generated.");
@@ -75,7 +81,37 @@ function ipcMessage(err: unknown): string {
   return String((err as Error)?.message ?? err).replace(/^Error invoking remote method '[^']+': (\w*Error: )?/, "");
 }
 const pages = new Pages(viewer, pagesEl, showPage);
-const epubView = new EpubView(viewer, pagesEl, showPage);
+// A turned page takes the selected text with it, so its menu goes too. (A reflow from a resize keeps both.)
+const epubView = new EpubView(viewer, pagesEl, showPage, () => hideMenu());
+const turnPrev = $<HTMLButtonElement>("turn-prev");
+const turnNext = $<HTMLButtonElement>("turn-next");
+
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3;
+
+const readingLook = setupReadingLook({
+  area: viewer.closest<HTMLElement>(".reader-area")!,
+  anchor: $("look-anchor"),
+  button: $<HTMLButtonElement>("look-btn"),
+  popover: $("look"),
+  epub: epubView,
+  sizeLimits: { min: MIN_ZOOM, max: MAX_ZOOM },
+  onSize: (size) => setZoom(size),
+  onLayoutChanged: () => {
+    hideMenu();
+    showTurnButtons();
+  },
+});
+
+/** The page-edge arrows, for a paginated EPUB only. */
+function showTurnButtons() {
+  const paged = book?.kind === "epub" && epubView.paged;
+  turnPrev.hidden = turnNext.hidden = !paged;
+  turnPrev.disabled = epubView.atStart;
+  turnNext.disabled = epubView.atEnd;
+}
+turnPrev.onclick = () => epubView.prev();
+turnNext.onclick = () => epubView.next();
 enableTextSelection(viewer);
 
 /**
@@ -169,7 +205,11 @@ async function openBook(path: string) {
   tocBtn.hidden = false;
   homeBtn.hidden = false;
   tbDivider.hidden = false;
-  setTocVisible(tocPreference());
+  // EPUBs keep the full width for the text: their contents drop down over it, closed until asked for.
+  layoutEl.classList.toggle("toc-dropdown", !!epub);
+  tocBtn.classList.toggle("dropdown", !!epub);
+  tocBtn.title = epub ? "Contents" : "Show or hide the contents";
+  setTocVisible(epub ? false : tocPreference());
 
   const state = await api.bookState(path);
   if (epub) {
@@ -188,6 +228,10 @@ async function openBook(path: string) {
     view = pages;
     await pages.load(pdf!, state.page);
   }
+  readingLook.setAvailable(!!epub);
+  if (epub) readingLook.sizeChanged(epubView.zoomLevel);
+  zoomLabel.textContent = `${Math.round(view.zoomLevel * 100)}%`;
+  showTurnButtons();
 }
 
 // ---------- Library ----------
@@ -346,8 +390,11 @@ async function closeBook() {
   pagesEl.replaceChildren();
   pagesEl.hidden = true;
   nav.hidden = true;
+  readingLook.setAvailable(false);
+  showTurnButtons();
   tocEl.hidden = true;
   tocBtn.hidden = true;
+  layoutEl.classList.remove("toc-dropdown");
   homeBtn.hidden = true;
   tbDivider.hidden = true;
   titleEl.textContent = "Agentic Reading";
@@ -377,6 +424,7 @@ function showPage(n: number) {
   progressPct.textContent = `${pct}%`;
   progressBar.style.width = `${pct}%`;
   prevBtn.disabled = n <= 1;
+  if (book.kind === "epub") showTurnButtons();
   nextBtn.disabled = n >= book.pageCount;
   clearTimeout(savePageTimer);
   const path = book.path;
@@ -384,12 +432,10 @@ function showPage(n: number) {
   savePageTimer = setTimeout(() => api.savePage(path, reader.position()), 400);
 }
 
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 3;
-
 function setZoom(zoom: number, anchor?: { x: number; y: number }) {
   view.setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), anchor);
   zoomLabel.textContent = `${Math.round(view.zoomLevel * 100)}%`;
+  if (view === epubView) readingLook.sizeChanged(view.zoomLevel);
 }
 
 // Ctrl + scroll zooms around the pointer. A trackpad pinch arrives the same way, in smaller steps.
@@ -491,12 +537,7 @@ function setSettingsOpen(open: boolean) {
   settingsBtn.setAttribute("aria-pressed", String(open));
 }
 settingsBtn.onclick = () => setSettingsOpen(settingsEl.hidden);
-document.addEventListener("mousedown", (e) => {
-  if (!settingsEl.hidden && !settingsEl.contains(e.target as Node) && !settingsBtn.contains(e.target as Node)) setSettingsOpen(false);
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !settingsEl.hidden) setSettingsOpen(false);
-});
+closeWhenDismissed(settingsEl, settingsBtn, () => !settingsEl.hidden, () => setSettingsOpen(false));
 
 // ---------- Contents sidebar ----------
 
@@ -510,9 +551,20 @@ function tocPreference(): boolean {
   }
 }
 
+/** For EPUBs the contents are a dropdown over the text rather than a sidebar beside it. */
+function tocIsDropdown() {
+  return layoutEl.classList.contains("toc-dropdown");
+}
+
 function setTocVisible(visible: boolean) {
   tocEl.hidden = !visible;
   tocBtn.setAttribute("aria-pressed", String(visible));
+  tocBtn.setAttribute("aria-expanded", String(visible));
+  if (tocIsDropdown()) {
+    // Opening it shows where you are; it's not a preference, so it isn't saved.
+    if (visible) tocBody.querySelector(".toc-link.active")?.scrollIntoView({ block: "center" });
+    return;
+  }
   try {
     localStorage.setItem(TOC_KEY, String(visible));
   } catch {
@@ -521,6 +573,7 @@ function setTocVisible(visible: boolean) {
 }
 
 tocBtn.onclick = () => setTocVisible(tocEl.hidden);
+closeWhenDismissed(tocEl, tocBtn, () => tocIsDropdown() && !tocEl.hidden, () => setTocVisible(false));
 
 /** Hides contents entries that don't match, keeping the parents of those that do. */
 function filterContents(query: string) {
@@ -765,6 +818,18 @@ document.addEventListener("keydown", (e) => {
   const t = e.target as HTMLElement;
   if (t instanceof HTMLInputElement || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
   if (!book) return;
+  // Paginated, the arrows, Space and Page Up/Down turn pages; scrolling, the arrows move a section.
+  if (view === epubView && epubView.paged && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const forward = e.key === "ArrowRight" || e.key === "PageDown" || (e.key === " " && !e.shiftKey);
+    const back = e.key === "ArrowLeft" || e.key === "PageUp" || (e.key === " " && e.shiftKey);
+    // Space still works a control inside an open menu, but a toolbar button left focused doesn't swallow it.
+    if ((forward || back) && !(e.key === " " && t instanceof Element && t.closest(".popover, #toc, .selection-menu"))) {
+      e.preventDefault();
+      if (forward) epubView.next();
+      else epubView.prev();
+      return;
+    }
+  }
   if (e.key === "ArrowRight") goTo(view.current + 1);
   else if (e.key === "ArrowLeft") goTo(view.current - 1);
   else if (!e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -798,17 +863,21 @@ resizableSidebar($("panel"), $("panel-resizer"), {
   min: 300,
   initial: 460,
   storageKey: "visual-reader:panel-width",
-  other: () => tocEl,
+  other: () => (tocIsDropdown() ? null : tocEl),
 });
 
-// Re-fit pages once the viewer's width settles, not on every frame of a sidebar drag.
+// Re-fit pages once the viewer's size settles, not on every frame of a sidebar drag.
+// Only paginated EPUBs care about the height: it decides how much fits on a page.
 let lastWidth = 0;
+let lastHeight = 0;
 let relayoutTimer: ReturnType<typeof setTimeout> | undefined;
 new ResizeObserver(() => {
-  if (Math.abs(viewer.clientWidth - lastWidth) < 4) return;
+  const heightMatters = view === epubView && epubView.paged;
+  if (Math.abs(viewer.clientWidth - lastWidth) < 4 && (!heightMatters || Math.abs(viewer.clientHeight - lastHeight) < 4)) return;
   clearTimeout(relayoutTimer);
   relayoutTimer = setTimeout(() => {
     lastWidth = viewer.clientWidth;
+    lastHeight = viewer.clientHeight;
     if (book) view.relayout();
   }, 120);
 }).observe(viewer);

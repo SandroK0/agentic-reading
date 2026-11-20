@@ -31,6 +31,25 @@ const KEEP_ATTRS = new Set([
 /** The point down the viewport that decides which section you're "on"; matches the PDF reader. */
 const READING_LINE = 0.3;
 const BASE_FONT_PX = 19;
+/** How long the lines are in Scroll and Single, in ems of the text: the reader's Width setting. */
+export const MIN_MEASURE = 20;
+export const MAX_MEASURE = 60;
+export const DEFAULT_MEASURE = 32;
+
+/**
+ * How the book is laid out: one long scroll, or paginated into one or two
+ * pages at a time that slide sideways when you turn them. Two pages falls
+ * back to one when the window is too narrow for two comfortable columns.
+ */
+export type EpubLayout = "scroll" | "single" | "double";
+
+/** Room left around the pages when paginated: the edges take clicks to turn, the bottom holds the page bar. */
+const PAGED_SIDE = 64;
+const PAGED_TOP = 36;
+const PAGED_BOTTOM = 60;
+/** How much wheel or trackpad travel turns one page, and how long a gesture must pause before the next can. */
+const SWIPE_DISTANCE = 40;
+const SWIPE_PAUSE_MS = 250;
 
 export interface EpubBook {
   title: string | null;
@@ -117,15 +136,24 @@ function target(from: string, href: string | null | undefined, sectionOf: (href:
 }
 
 /**
- * The book as one column of sections, each on its own sheet, in the reader's
- * theme. Zoom scales the type; the text reflows to the viewer's width.
+ * The book in the reader's theme. Scrolling shows the sections as one column
+ * of sheets; paginated shows one section at a time, flowed into CSS columns
+ * one page wide, and turns pages by sliding those columns sideways. Zoom
+ * scales the type; the text reflows to fit either way.
  */
 export class EpubView {
   private book: EpubBook | null = null;
   private sheets: HTMLElement[] = [];
   private urls: string[] = [];
   private zoom = 1;
+  private measure = DEFAULT_MEASURE;
   private scrollQueued = false;
+  private layout: EpubLayout = "scroll";
+  /** Paginated only: which spread of the current section is showing, out of how many, and how far apart they are. */
+  private spread = 0;
+  private spreads = 1;
+  private step = 1;
+  private swipe = { travel: 0, locked: false, timer: undefined as ReturnType<typeof setTimeout> | undefined };
   current = 1;
 
   constructor(
@@ -133,9 +161,11 @@ export class EpubView {
     private container: HTMLElement,
     /** Called with the current section on every scroll, so the app can save your exact place. */
     private onMove: (section: number) => void,
+    /** Called when you turn a page (paginated only), not when a resize or setting reflows it. */
+    private onTurn: () => void = () => {},
   ) {
     viewer.addEventListener("scroll", () => {
-      if (!this.book || this.scrollQueued) return;
+      if (!this.book || this.paged || this.scrollQueued) return;
       this.scrollQueued = true;
       requestAnimationFrame(() => {
         this.scrollQueued = false;
@@ -150,6 +180,36 @@ export class EpubView {
       if (link.dataset.external) window.open(link.dataset.external);
       else this.goTo(Number(link.dataset.section), { anchor: link.dataset.target });
     });
+    // Paginated, a swipe or a turn of the wheel turns one page per gesture. Ctrl + wheel stays zoom.
+    // Listened for on the whole reading area, so a swipe that starts over a page-edge arrow counts too.
+    (viewer.parentElement ?? viewer).addEventListener("wheel", (e) => {
+      if (!this.book || !this.paged || e.ctrlKey) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      const swipe = this.swipe;
+      clearTimeout(swipe.timer);
+      swipe.timer = setTimeout(() => Object.assign(swipe, { travel: 0, locked: false }), SWIPE_PAUSE_MS);
+      if (swipe.locked) return;
+      swipe.travel += delta;
+      if (Math.abs(swipe.travel) < SWIPE_DISTANCE) return;
+      swipe.locked = true;
+      if (swipe.travel > 0) this.next();
+      else this.prev();
+    }, { passive: true });
+  }
+
+  /** True when the book is paginated rather than scrolling. */
+  get paged() {
+    return this.layout !== "scroll";
+  }
+
+  /** Paginated: on the first page of the book, or the last. */
+  get atStart() {
+    return this.current <= 1 && this.spread === 0;
+  }
+
+  /** Paginated: on the last page of the last section. */
+  get atEnd() {
+    return this.current >= this.sheets.length && this.spread >= this.spreads - 1;
   }
 
   get count() {
@@ -170,10 +230,14 @@ export class EpubView {
       const sheet = document.createElement("article");
       sheet.className = "epub-section";
       sheet.dataset.page = String(i + 1);
-      sheet.append(...this.render(p));
+      // Marks where the text ends, so a paginated section can count its pages.
+      const end = document.createElement("span");
+      end.className = "epub-end";
+      sheet.append(...this.render(p), end);
       return sheet;
     });
     this.container.replaceChildren(...this.sheets);
+    this.applyLayout();
     // Images change the height of everything after them, so wait for them before scrolling to a saved spot.
     await Promise.race([
       Promise.all([...this.container.querySelectorAll("img")].map((img) => img.decode().catch(() => {}))),
@@ -181,6 +245,15 @@ export class EpubView {
     ]);
     if (this.book !== book) return;
     this.goTo(Math.floor(start), { fraction: start % 1 });
+    // An image that arrives after that changes how many pages its section has: re-count, keeping your place.
+    let recount: ReturnType<typeof setTimeout> | undefined;
+    for (const img of this.container.querySelectorAll("img")) {
+      if (img.complete) continue;
+      img.addEventListener("load", () => {
+        clearTimeout(recount);
+        recount = setTimeout(() => this.book === book && this.relayout(), 100);
+      }, { once: true });
+    }
   }
 
   /** Empties the viewer and frees the book's images. */
@@ -189,19 +262,73 @@ export class EpubView {
     this.sheets = [];
     for (const url of this.urls) URL.revokeObjectURL(url);
     this.urls = [];
-    this.container.classList.remove("epub");
-    this.container.style.removeProperty("--epub-font-size");
+    this.container.classList.remove("epub", "paged");
+    this.viewer.classList.remove("epub-paged");
+    for (const prop of ["--epub-font-size", "--epub-measure", "--page-w", "--page-h", "--cols", "--gap"]) this.container.style.removeProperty(prop);
     this.container.replaceChildren();
+  }
+
+  /** Switches between scrolling and one or two pages, keeping your place. */
+  setLayout(layout: EpubLayout) {
+    if (layout === this.layout) return;
+    const at = this.sheets.length ? this.position() : null;
+    this.layout = layout;
+    if (at === null) return;
+    this.applyLayout();
+    this.viewer.scrollTop = 0;
+    this.goTo(Math.floor(at), { fraction: at % 1 });
+  }
+
+  /** Paginated: turns to the next page, into the next section after the last one. False if there's nowhere to go. */
+  next(): boolean {
+    if (!this.paged || !this.sheets.length) return false;
+    if (this.spread < this.spreads - 1) {
+      this.onTurn();
+      this.showSpread(this.spread + 1, true);
+      this.onMove(this.current);
+      return true;
+    }
+    if (this.current >= this.sheets.length) return false;
+    this.onTurn();
+    this.turnTo(this.current + 1, "first", 1);
+    return true;
+  }
+
+  /** Paginated: turns back a page, onto the last page of the section before at the start of one. */
+  prev(): boolean {
+    if (!this.paged || !this.sheets.length) return false;
+    if (this.spread > 0) {
+      this.onTurn();
+      this.showSpread(this.spread - 1, true);
+      this.onMove(this.current);
+      return true;
+    }
+    if (this.current <= 1) return false;
+    this.onTurn();
+    this.turnTo(this.current - 1, "last", -1);
+    return true;
   }
 
   /** Scrolls to a section: its start, a fraction through it, an anchor in it, or the place a passage was quoted from. */
   goTo(n: number, target: { fraction?: number; anchor?: string; passage?: string } = {}) {
     if (!this.sheets.length) return;
-    const sheet = this.sheets[Math.min(Math.max(1, Math.round(n) || 1), this.sheets.length) - 1];
-    let y = this.top(sheet) + (target.fraction ?? 0) * sheet.offsetHeight;
-    const spot =
+    const index = Math.min(Math.max(1, Math.round(n) || 1), this.sheets.length);
+    const sheet = this.sheets[index - 1];
+    const find = () =>
       (target.anchor && sheet.querySelector(`[data-anchor="${CSS.escape(target.anchor)}"]`)) ||
       (target.passage && findText(sheet, target.passage));
+    if (this.paged) {
+      const from = this.current;
+      this.showSection(index);
+      const spot = find();
+      const spread = spot ? this.spreadOf(spot) : Math.floor((target.fraction ?? 0) * this.spreads + 1e-6);
+      this.showSpread(spread, false);
+      if (index !== from) this.slideIn(index > from ? 1 : -1);
+      this.onMove(this.current);
+      return;
+    }
+    let y = this.top(sheet) + (target.fraction ?? 0) * sheet.offsetHeight;
+    const spot = find();
     if (spot) y += spot.getBoundingClientRect().top - sheet.getBoundingClientRect().top;
     this.viewer.scrollTop = y - 12;
     this.track();
@@ -211,8 +338,17 @@ export class EpubView {
   position(): number {
     const sheet = this.sheets[this.current - 1];
     if (!sheet) return 1;
+    if (this.paged) return this.current + Math.min(0.999, this.spread / this.spreads);
     const along = (this.viewer.scrollTop + 12 - this.top(sheet)) / Math.max(1, sheet.offsetHeight);
     return this.current + Math.min(0.999, Math.max(0, along));
+  }
+
+  /** Sets how wide the text runs in Scroll and Single (in ems), keeping your place. Two pages ignores it. */
+  setMeasure(ems: number) {
+    const measure = Math.min(MAX_MEASURE, Math.max(MIN_MEASURE, ems));
+    if (measure === this.measure) return;
+    this.measure = measure;
+    this.relayout();
   }
 
   setZoom(zoom: number) {
@@ -226,6 +362,7 @@ export class EpubView {
     if (!this.sheets.length) return;
     const at = this.position();
     this.applyZoom();
+    this.applyLayout();
     this.goTo(Math.floor(at), { fraction: at % 1 });
   }
 
@@ -235,6 +372,86 @@ export class EpubView {
 
   private applyZoom() {
     this.container.style.setProperty("--epub-font-size", `${BASE_FONT_PX * this.zoom}px`);
+    this.container.style.setProperty("--epub-measure", String(this.measure));
+  }
+
+  /**
+   * Sizes the page box to the viewer. Two columns need room for about 20em
+   * each; the measure is capped so lines stay readable in a wide window.
+   */
+  private applyLayout() {
+    const paged = this.paged && this.sheets.length > 0;
+    this.container.classList.toggle("paged", paged);
+    this.viewer.classList.toggle("epub-paged", paged);
+    for (const sheet of this.sheets) {
+      sheet.classList.remove("current", "sliding");
+      sheet.style.removeProperty("transform");
+    }
+    if (!paged) return;
+    const font = BASE_FONT_PX * this.zoom;
+    const room = this.viewer.clientWidth - 2 * PAGED_SIDE;
+    const two = this.layout === "double" && room >= font * 42;
+    const gap = Math.round(font * (two ? 3.5 : 3));
+    // The Width setting is for Single and Scroll; Two pages that falls back to one keeps the default measure.
+    const measure = this.layout === "single" ? this.measure : DEFAULT_MEASURE;
+    const width = Math.max(200, Math.floor(Math.min(room, font * (two ? 70 : measure))));
+    const height = Math.max(200, this.viewer.clientHeight - PAGED_TOP - PAGED_BOTTOM);
+    this.step = width + gap;
+    const style = this.container.style;
+    style.setProperty("--page-w", `${width}px`);
+    style.setProperty("--page-h", `${height}px`);
+    style.setProperty("--cols", two ? "2" : "1");
+    style.setProperty("--gap", `${gap}px`);
+  }
+
+  /** Paginated: shows section `n` alone and counts its spreads. */
+  private showSection(n: number) {
+    for (const sheet of this.sheets) {
+      const on = Number(sheet.dataset.page) === n;
+      sheet.classList.toggle("current", on);
+      sheet.classList.remove("sliding");
+      if (!on) sheet.style.removeProperty("transform");
+    }
+    this.current = n;
+    const sheet = this.sheets[n - 1];
+    const end = sheet.querySelector(".epub-end");
+    const offset = end ? end.getBoundingClientRect().left - sheet.getBoundingClientRect().left : 0;
+    this.spreads = Math.max(1, Math.floor((offset + 1) / this.step) + 1);
+  }
+
+  /** Paginated: moves the section sideways to `spread`, sliding there if `animate`. */
+  private showSpread(spread: number, animate: boolean) {
+    this.spread = Math.min(Math.max(0, spread), this.spreads - 1);
+    const sheet = this.sheets[this.current - 1];
+    sheet.classList.toggle("sliding", animate);
+    sheet.style.transform = `translateX(${-this.spread * this.step}px)`;
+  }
+
+  /** Paginated: which spread an element (or the start of a passage) is on. */
+  private spreadOf(el: Element | Range) {
+    const sheet = this.sheets[this.current - 1];
+    const left = el.getBoundingClientRect().left - sheet.getBoundingClientRect().left;
+    return Math.floor((left + 1) / this.step);
+  }
+
+  /** Paginated: turns onto another section's first or last page, sliding it in from the side you're heading to. */
+  private turnTo(n: number, at: "first" | "last", direction: 1 | -1) {
+    this.showSection(n);
+    this.showSpread(at === "first" ? 0 : this.spreads - 1, false);
+    this.slideIn(direction);
+    this.onMove(this.current);
+  }
+
+  /** A new section slides in from the side you're heading to, like the next page would. */
+  private slideIn(direction: 1 | -1) {
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    this.sheets[this.current - 1].animate(
+      [
+        { translate: `${direction * 48}px 0`, opacity: 0 },
+        { translate: "0 0", opacity: 1 },
+      ],
+      { duration: 280, easing: "cubic-bezier(0.22, 0.8, 0.3, 1)" },
+    );
   }
 
   private top(sheet: HTMLElement) {
@@ -321,23 +538,32 @@ export class EpubView {
   }
 }
 
-/** The first element holding the start of `passage`, matching through any whitespace and markup. */
-function findText(root: Element, passage: string): Element | null {
+/**
+ * The first character of `passage`, matching through any whitespace and
+ * markup. A range rather than its element, so a passage in the middle of a
+ * long paragraph is found where it is, even on a later page than the paragraph's start.
+ */
+function findText(root: Element, passage: string): Range | null {
   const needle = passage.replace(/\s+/g, " ").trim().slice(0, 80);
   if (!needle) return null;
   let flat = "";
-  const owners: Node[] = [];
+  const owners: { node: Node; offset: number }[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    for (const ch of node.textContent ?? "") {
-      const c = /\s/.test(ch) ? " " : ch;
+    const text = node.textContent ?? "";
+    for (let i = 0; i < text.length; i++) {
+      const c = /\s/.test(text[i]) ? " " : text[i];
       if (c === " " && flat.endsWith(" ")) continue;
       flat += c;
-      owners.push(node);
+      owners.push({ node, offset: i });
     }
   }
   const at = flat.indexOf(needle);
-  return at < 0 ? null : (owners[at].parentElement ?? null);
+  if (at < 0) return null;
+  const range = document.createRange();
+  range.setStart(owners[at].node, owners[at].offset);
+  range.setEnd(owners[at].node, owners[at].offset + 1);
+  return range;
 }
 
 function text(files: Record<string, Uint8Array>, filePath: string): string {

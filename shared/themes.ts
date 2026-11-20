@@ -165,3 +165,25 @@ export function themeCss(theme: Theme, selector: string, scheme?: "light" | "dar
 export function allThemesCss(): string {
   return THEMES.map((t) => themeCss(t, `:root[data-theme="${t.id}"]`)).join("\n");
 }
+
+/**
+ * Page colours for EPUBs, picked in the Aa menu and laid over whichever app
+ * theme is on. They set only the reading area's custom properties; "theme"
+ * sets none, so the page keeps the theme's own colours.
+ */
+export type PageColorId = "theme" | "paper" | "sepia" | "gray" | "night";
+
+export interface PageColor {
+  id: PageColorId;
+  label: string;
+  /** --epub-bg, --epub-text, --epub-text-2 and --epub-link; absent for "theme". */
+  vars?: { bg: string; text: string; text2: string; link: string };
+}
+
+export const PAGE_COLORS: PageColor[] = [
+  { id: "theme", label: "Theme" },
+  { id: "paper", label: "Paper", vars: { bg: "#ffffff", text: "#14171c", text2: "#535b67", link: "#2747d6" } },
+  { id: "sepia", label: "Sepia", vars: { bg: "#f6eedc", text: "#3b2f22", text2: "#6a5844", link: "#8a3f0f" } },
+  { id: "gray", label: "Gray", vars: { bg: "#3d3f44", text: "#e4e4e6", text2: "#b5b7bd", link: "#a9c1ff" } },
+  { id: "night", label: "Night", vars: { bg: "#111214", text: "#c9c6bf", text2: "#9a968e", link: "#e0b06a" } },
+];

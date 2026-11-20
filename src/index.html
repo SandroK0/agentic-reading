@@ -13,7 +13,8 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h3v16H5zM10 4h3v16h-3zM15.5 5.2l2.9-.8 3.6 14.6-2.9.7z" /></svg>
       </button>
       <button class="icon-btn" id="toc-btn" title="Show or hide the contents" aria-label="Contents" aria-pressed="true" hidden>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9.5 4.5v15" /></svg>
+        <svg class="when-sidebar" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d="M9.5 4.5v15" /></svg>
+        <svg class="when-dropdown" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01" stroke-width="2.25" /></svg>
       </button>
       <span class="tb-divider" id="tb-divider" hidden></span>
       <button class="tb-text-btn" id="open-btn" title="Open a PDF or EPUB (⌘O)">
@@ -28,6 +29,35 @@
     </div>
 
     <div class="tb-group">
+      <div class="popover-anchor" id="look-anchor" hidden>
+        <button class="icon-btn look-btn" id="look-btn" title="Text and layout" aria-label="Text and layout" aria-haspopup="dialog" aria-expanded="false">Aa</button>
+        <div class="popover look" id="look" role="dialog" aria-label="Text and layout" hidden>
+          <section>
+            <div class="look-size">
+              <button class="small" id="look-smaller" title="Smaller text" aria-label="Smaller text">A</button>
+              <span id="look-size-label" aria-live="polite">100%</span>
+              <button class="large" id="look-larger" title="Larger text" aria-label="Larger text">A</button>
+            </div>
+          </section>
+          <section>
+            <div class="popover-head"><h2>Page</h2></div>
+            <div class="look-colors" id="look-colors" role="radiogroup" aria-label="Page colour"></div>
+          </section>
+          <section>
+            <div class="popover-head"><h2>Layout</h2></div>
+            <div class="look-layouts" id="look-layouts" role="radiogroup" aria-label="Layout"></div>
+            <label class="look-width" id="look-width-row" title="How wide the text runs, in Scroll and Single">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="4" width="8" height="16" rx="1.5" /></svg>
+              <input type="range" id="look-width" step="1" aria-label="Text width">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1.5" /></svg>
+            </label>
+          </section>
+          <section>
+            <div class="popover-head"><h2>Font</h2></div>
+            <div class="model-list look-fonts" id="look-fonts" role="radiogroup" aria-label="Font"></div>
+          </section>
+        </div>
+      </div>
       <div class="popover-anchor">
         <button class="icon-btn" id="settings-btn" title="Theme and model" aria-label="Theme and model" aria-haspopup="dialog" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>
@@ -93,6 +123,13 @@
           <div class="selection-foot"><span id="selection-model"></span><span>Esc to close</span></div>
         </div>
       </div>
+
+      <button class="page-turn prev" id="turn-prev" title="Previous page" aria-label="Previous page" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+      </button>
+      <button class="page-turn next" id="turn-next" title="Next page" aria-label="Next page" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
+      </button>
 
       <div class="pagebar" id="nav" role="toolbar" aria-label="Page and zoom" hidden>
         <button id="prev" aria-label="Previous page">

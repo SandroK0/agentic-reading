@@ -39,8 +39,8 @@ Open the DMG and drag the app to Applications. It shares its library with `npm s
 
 - **Open a book:** click Open (⌘O), drop a PDF or EPUB on the window, or pick one in the library. The library is the home screen: the book you were last reading, with how far you are, and the others you've opened. The books icon at the top left goes back to it. File → Open recent works too.
 - **Read:** scroll through the book continuously, or use the ← → keys. The small bar in the bottom-right corner of the page shows where you are: click the number to jump to a page, ‹ › to turn one, − + to zoom. It stays faint until you point at it. The app remembers your page in each book.
-- **Contents:** the sidebar lists the book's chapters, with the one you're in highlighted, a box to filter them, and how far through the book you are.
-- **EPUBs** show in the reader's theme and reflow to fit the window; − + changes the type size. The book's own styles are dropped. The page box counts the book's sections (usually chapters) instead of pages, and the app remembers how far through a section you were.
+- **Contents:** the sidebar lists the book's chapters, with the one you're in highlighted, a box to filter them, and how far through the book you are. In an EPUB the contents drop down over the text from the list button at the top left instead, so the pages keep the full width; picking a chapter closes them.
+- **EPUBs** show in the reader's theme and reflow to fit the window; the book's own styles are dropped. The **Aa** button in the toolbar sets how they look, for every book: text size, a page colour (Paper, Sepia, Gray or Night, or the theme's own), a font from the ones macOS ships with, and the layout. **Two pages** (the default) and **Single** lay a chapter out as pages that slide sideways when you turn them: click the page edges, press ← → or Space, or swipe. Two pages falls back to one when the window is narrow. **Scroll** shows the book as one long column. In Scroll and Single a **Width** slider sets how long the lines are. The app theme never changes the book's font. The page box counts the book's sections (usually chapters) instead of pages, and the app remembers how far through a section you were.
 - **Explain a passage:** select text, then click **Explain** (`E`) for a few sentences, or **Explain visually** (`V`) for a drawing.
 - **Follow up:** type a question under any explainer. Follow-ups continue the same conversation and keep its style, so Claude remembers the passage.
 - **No contents in the PDF?** Click **Generate with AI** in the Contents sidebar. It reads the book's headings and any printed contents page, and the result is saved with the book. **Regenerate** and **Remove** sit at the top of the list.
@@ -65,7 +65,9 @@ Open the DMG and drag the app to Applications. It shares its library with `npm s
 | `electron/store.ts` | `state.json` in the app's data folder: recent books, page per book, saved explainers, settings |
 | `src/main.ts` | The renderer: picks the PDF or EPUB view, selection, explainer cards with live streaming |
 | `src/pages.ts` | The PDF view: PDF.js pages and text layers, drawn only near the visible area |
-| `src/epub.ts` | The EPUB view: unzips the book, reads its spine and table of contents, and shows each section as clean markup (no scripts, styles or classes from the book) |
+| `src/epub.ts` | The EPUB view: unzips the book, reads its spine and table of contents, and shows each section as clean markup (no scripts, styles or classes from the book). Scrolls, or paginates a section into CSS columns one or two pages wide and slides between them |
+| `src/reading-look.ts` | The Aa menu for EPUBs: text size, page colour, layout, width and font, saved for every book. Page colours live in `shared/themes.ts` beside the themes |
+| `src/popover.ts` | Closes menus and dropdowns on an outside click or Escape |
 
 ### Adding a model provider
 
