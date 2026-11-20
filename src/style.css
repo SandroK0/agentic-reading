@@ -162,6 +162,64 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 5px; border-radi
 .look-layout[aria-checked="true"] { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
 .look-layout:hover:not(:disabled):not([aria-checked="true"]) { background: var(--hover); }
 .look-fonts .model-option span { font-size: 15px; }
+
+/* Search in an EPUB: the box, a count, and results by chapter; matches are marked on the page too. */
+.popover.search { width: 360px; max-height: calc(100vh - 80px); }
+.search-head { padding: 10px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border); }
+.search-field { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: var(--radius); background: var(--surface); color: var(--text-2); }
+.search-field svg { width: 15px; height: 15px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; }
+.search-field input { flex: 1; min-width: 0; height: 32px; padding: 0; border: 0; background: transparent; outline: none; font-size: 13.5px; color: var(--text); }
+#search-count { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.search-nav { display: flex; align-items: center; justify-content: space-between; min-height: 28px; font-size: 12px; color: var(--text-2); }
+.search-nav > span:last-child { display: flex; gap: 2px; }
+.search-nav .icon-btn { width: 28px; height: 28px; }
+.search-results { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 1px; }
+.search-chapter { padding: 10px 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); }
+.search-chapter:first-child { padding-top: 4px; }
+.search-result { height: auto; padding: 7px 8px; border-color: transparent; text-align: left; line-height: 1.45; font-size: 12.5px; }
+.search-result b { font-weight: 600; background: var(--search-hit); border-radius: 2px; }
+.search-result[aria-current="true"] { background: var(--accent-bg); }
+::highlight(search-hit) { background-color: var(--search-hit); }
+::highlight(search-current) { background-color: var(--search-current); color: var(--search-current-text); }
+
+/*
+ * Reading an EPUB, the toolbar fades after a moment and takes on the colour
+ * behind the text, so nothing sits above the page; the pointer near the top
+ * brings it back (see the focus code in main.ts).
+ */
+.toolbar { transition: background-color 400ms, border-color 400ms; }
+.toolbar > * { transition: opacity 400ms; }
+body.reading-focus .toolbar { border-bottom-color: transparent; background: var(--canvas); }
+body.reading-focus:has(.viewer.epub-paged) .toolbar { background: var(--epub-bg, var(--bg)); }
+body.reading-focus .toolbar > * { opacity: 0; }
+
+/* Rows that open the Customize sheet, and its header. */
+.look-row { width: 100%; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border: 0; border-top: 1px solid var(--border); border-radius: 0; font-weight: 500; }
+.look-row-hint { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 400; color: var(--text-2); }
+.look-row svg, .look-sub-head svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.look-sub-head { height: 44px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 6px; border-bottom: 1px solid var(--border); }
+.look-sub-head button { justify-self: start; height: 30px; display: flex; align-items: center; gap: 2px; padding: 0 8px; border-color: transparent; color: var(--accent); font-weight: 500; }
+.look-sub-head h2 { margin: 0; font-size: 13px; color: var(--text); }
+.look-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 14px; }
+.look-foot > button:not(.look-switch) { height: 26px; padding: 0 10px; font-size: 12px; }
+
+/* Sliders with their value, segmented choices and on/off switches. */
+.look-slider { display: flex; flex-direction: column; gap: 6px; }
+.look-slider > span { display: flex; justify-content: space-between; font-size: 12.5px; }
+.look-slider b { font-weight: 500; }
+.look-slider > span > span { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.look-slider input { width: 100%; margin: 0; accent-color: var(--accent); }
+.look-segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 2px; border-radius: var(--radius); background: var(--surface); }
+.look-segmented button { height: 28px; padding: 0; border: 0; border-radius: calc(var(--radius) - 2px); background: none; color: var(--text-2); font-size: 12px; font-weight: 500; }
+.look-segmented button[aria-checked="true"] { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.look-switches { gap: 0 !important; padding-top: 6px !important; padding-bottom: 6px !important; }
+.look-switch { width: 100%; height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0; border: 0; background: none; text-align: left; font-size: 12.5px; }
+.look-switch:hover:not(:disabled) { background: none; }
+.look-switch i { position: relative; width: 32px; height: 18px; flex-shrink: 0; border-radius: 9px; background: var(--border); transition: background-color 150ms; }
+.look-switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-2); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: left 150ms, background-color 150ms; }
+.look-switch[aria-checked="true"] i { background: var(--accent); }
+.look-switch[aria-checked="true"] i::after { left: 16px; background: var(--on-accent); }
+.look-foot .look-switch { height: 32px; color: var(--text-2); }
 .look-width { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
 .look-width svg { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.6; }
 .look-width input { flex: 1; min-width: 0; margin: 0; accent-color: var(--accent); }
@@ -297,11 +355,12 @@ body.resizing iframe { pointer-events: none; }
 
 /* ---------- Reader ---------- */
 
-.reader-area { position: relative; flex: 1; min-width: 0; display: flex; }
+.reader-area { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .viewer {
   position: relative;
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow: auto;
   background: var(--canvas);
   padding: 28px 32px 56px;
@@ -321,14 +380,21 @@ body.resizing iframe { pointer-events: none; }
 .textLayer ::highlight(pending-selection) { background-color: var(--selection); }
 
 /* EPUBs: each section on its own sheet, the text in the theme's colours and reflowed to fit. */
-/* The sheet is the Width setting's measure plus its side padding (3.2em each side). */
-.pages.epub { width: min(calc(var(--epub-font-size, 19px) * (var(--epub-measure, 32) + 6.4)), 100%); }
+/*
+ * The sheet is the Width setting's measure plus its side padding (the Margins
+ * setting, in ems). The Customize settings arrive as --epub-* properties on
+ * the reading area (see reading-look.ts).
+ */
+.pages.epub { width: min(calc(var(--epub-font-size, 19px) * (var(--epub-measure, 32) + 2 * var(--epub-pad, 3.2))), 100%); }
 .epub-section {
-  width: 100%; box-sizing: border-box; padding: 3em 3.2em;
+  width: 100%; box-sizing: border-box; padding: 3em calc(var(--epub-pad, 3.2) * 1em);
   background: var(--epub-bg, var(--bg)); color: var(--epub-text, var(--text)); box-shadow: var(--page-shadow);
-  font-family: var(--epub-font, var(--book-serif)); font-size: var(--epub-font-size, 19px); line-height: 1.6;
+  font-family: var(--epub-font, var(--book-serif)); font-size: var(--epub-font-size, 19px);
+  line-height: var(--epub-line-height, 1.6); letter-spacing: var(--epub-letter-spacing, normal);
+  word-spacing: var(--epub-word-spacing, normal); font-weight: var(--epub-weight, 400);
   user-select: text; overflow-wrap: break-word;
 }
+.epub-section :is(p, li, blockquote, dd) { text-align: var(--epub-align, start); hyphens: var(--epub-hyphens, manual); -webkit-hyphens: var(--epub-hyphens, manual); }
 .epub-section ::selection { background: var(--selection); }
 .epub-section ::highlight(pending-selection) { background-color: var(--selection); }
 .epub-section :is(h1, h2, h3, h4) { line-height: 1.25; margin: 1.4em 0 0.6em; }
@@ -360,6 +426,8 @@ body.resizing iframe { pointer-events: none; }
   column-count: var(--cols); column-gap: var(--gap); column-fill: auto;
 }
 .pages.epub.paged .epub-section.current { display: block; }
+/* An invisible copy of a section, laid out in the same box only to count its pages. */
+.pages.epub.paged .epub-section.epub-measure { display: block; position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; }
 .pages.epub.paged .epub-section.sliding { transition: transform 420ms cubic-bezier(0.22, 0.8, 0.3, 1); }
 .pages.epub.paged .epub-section > :first-child { margin-top: 0; }
 .pages.epub.paged .epub-section :is(h1, h2, h3, h4) { break-after: avoid; }
@@ -369,9 +437,33 @@ body.resizing iframe { pointer-events: none; }
   .pages.epub.paged .epub-section.sliding { transition: none; }
 }
 
+/*
+ * Below an EPUB: the progress bar across the top edge (chapter marks, hover
+ * for where a point is, drag or click to go there), then a back button after
+ * a jump, the pages showing and how many are left in the chapter.
+ */
+.epub-footer { flex: 0 0 52px; position: relative; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 24px 10px; background: var(--canvas); color: var(--epub-text-2, var(--text-2)); font-size: 12px; font-variant-numeric: tabular-nums; user-select: none; }
+.viewer.epub-paged ~ .epub-footer { background: var(--epub-bg, var(--bg)); }
+.epub-footer-row { position: relative; height: 26px; display: flex; align-items: center; justify-content: center; }
+.epub-footer-pages { white-space: nowrap; }
+.epub-footer-left { position: absolute; right: 0; white-space: nowrap; }
+.back-pill { position: absolute; left: 0; height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 12px 0 8px; border: 0; border-radius: 13px; background: var(--epub-text, var(--text)); color: var(--epub-bg, var(--bg)); font-size: 12px; font-weight: 500; }
+.back-pill:hover:not(:disabled) { background: var(--epub-text, var(--text)); filter: brightness(1.15); }
+.back-pill svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.scrubber { position: absolute; left: 24px; right: 24px; top: 4px; height: 16px; cursor: pointer; outline: none; }
+.scrubber-track { position: absolute; left: 0; right: 0; top: 7px; height: 2px; border-radius: 2px; background: var(--border); overflow: hidden; transition: top 120ms, height 120ms; }
+.scrubber-fill { height: 100%; width: 0; background: var(--epub-text-2, var(--text-2)); }
+.scrubber-ticks { position: absolute; left: 0; right: 0; top: 5px; height: 6px; opacity: 0; transition: opacity 120ms; }
+.scrubber-ticks i { position: absolute; top: 0; width: 2px; height: 6px; margin-left: -1px; border-radius: 1px; background: var(--epub-text-2, var(--text-2)); opacity: 0.5; }
+.scrubber-thumb { position: absolute; top: 2px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: var(--epub-text-2, var(--text-2)); box-shadow: 0 0 0 2px var(--epub-bg, var(--bg)); opacity: 0; transition: opacity 120ms; }
+.scrubber:hover .scrubber-track, .scrubber:focus-visible .scrubber-track, .scrubber.dragging .scrubber-track { top: 6px; height: 4px; }
+.scrubber:hover :is(.scrubber-ticks, .scrubber-thumb), .scrubber:focus-visible :is(.scrubber-ticks, .scrubber-thumb), .scrubber.dragging :is(.scrubber-ticks, .scrubber-thumb) { opacity: 1; }
+.scrubber-tip { position: absolute; bottom: 22px; transform: translateX(-50%); z-index: 20; display: flex; gap: 8px; padding: 6px 10px; border-radius: var(--radius); background: var(--text); color: var(--bg); font-size: 12px; white-space: nowrap; pointer-events: none; box-shadow: var(--shadow); }
+.scrubber-tip b { font-weight: 600; }
+
 /* The page edges turn pages when paginated: faint arrows that show on hover. */
 .page-turn {
-  position: absolute; z-index: 4; top: 0; bottom: 56px; width: 56px; padding: 0;
+  position: absolute; z-index: 4; top: 0; bottom: 52px; width: 56px; padding: 0;
   display: grid; place-items: center; border: 0; border-radius: 0; background: none;
   color: var(--epub-text-2, var(--text-2)); opacity: 0; transition: opacity 150ms;
 }

@@ -51,7 +51,7 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     await shot("0b-library-after");
     await js(`document.querySelector("#empty .continue button.primary").click()`);
     if (!(await waitFor(`document.getElementById("page-total").textContent !== "/ –" && !document.getElementById("pages").hidden`, 30_000))) throw new Error("book never reopened");
-    if (/\.epub$/i.test(pdf)) return quit((await epubSelfTest(js, waitFor, shot)) ? 0 : 1);
+    if (/\.epub$/i.test(pdf)) return quit((await epubSelfTest(js, waitFor, shot, win)) ? 0 : 1);
 
     // README screenshots: two real explanations on the page, then the app in a few themes, saved to VR_SELFTEST_SCREENSHOTS.
     if (process.env.VR_SELFTEST_SCREENSHOTS) {
@@ -573,7 +573,7 @@ type Js = <T>(code: string) => Promise<T>;
  * keeping your place, then selecting a paragraph and asking for a written
  * explanation (skipped with VR_SELFTEST_NO_EXPLAIN), whose card jumps back to the passage.
  */
-async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promise<boolean>, shot: (name: string) => Promise<void>) {
+async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promise<boolean>, shot: (name: string) => Promise<void>, win: BrowserWindow) {
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   await waitFor(`!!document.querySelector(".epub-section")`, 15_000);
   await waitFor(`!!document.querySelector(".toc-link") || !!document.querySelector(".toc-empty")`, 15_000);
@@ -674,7 +674,7 @@ async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promi
   if (!selected || !menu) return false;
 
   // The paginated checks change layout, which clears the selection, so they run after Explain (or instead of it).
-  if (process.env.VR_SELFTEST_NO_EXPLAIN) return (await epubPagedTest(js, pause, shot, pickLayout)) && dropdownOk && jumpOk && zoomOk && opened.sections > 0 && opened.brokenImages === 0;
+  if (process.env.VR_SELFTEST_NO_EXPLAIN) return (await epubPagedTest(js, pause, shot, pickLayout)) && (await epubReadingToolsTest(js, waitFor, pause, shot, pickLayout, win)) && dropdownOk && jumpOk && zoomOk && opened.sections > 0 && opened.brokenImages === 0;
 
   await js(`document.getElementById("explain-text").click()`);
   const done = await waitFor(`!!document.querySelector(".card .followup:not([hidden])") || !!document.querySelector(".card .status.error")`, 180_000);
@@ -725,7 +725,7 @@ async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promi
   await pickLayout("Scroll");
   const pagedJumpOk = pagedBack.page === selected.section && pagedBack.passageShown;
   console.log(`[selftest] epub paginated card jump ok=${pagedJumpOk}`, JSON.stringify(pagedBack));
-  const pagedOk = await epubPagedTest(js, pause, shot, pickLayout);
+  const pagedOk = (await epubPagedTest(js, pause, shot, pickLayout)) && (await epubReadingToolsTest(js, waitFor, pause, shot, pickLayout, win));
   return done && !card.error && back.page === selected.section && back.visible && jumpOk && zoomOk && pagedOk && dropdownOk && pagedJumpOk;
 }
 
@@ -855,4 +855,172 @@ async function epubPagedTest(js: Js, pause: (ms: number) => Promise<unknown>, sh
   await shot("epub-9-look-menu");
   await js(`document.getElementById("look-btn").click()`);
   return twoOk && spaceOk && crossOk && singleOk && fontOk && widthOk;
+}
+
+/**
+ * The EPUB reader's tools: the Customize sheet, a book keeping its own
+ * look, Night in dark mode, the whole-book page count and progress bar, the
+ * "Back to" button, search, and the toolbar resting while you read.
+ */
+async function epubReadingToolsTest(
+  js: Js,
+  waitFor: (code: string, ms: number) => Promise<boolean>,
+  pause: (ms: number) => Promise<unknown>,
+  shot: (name: string) => Promise<void>,
+  pickLayout: (label: string) => Promise<unknown>,
+  win: BrowserWindow,
+) {
+  const results: Record<string, boolean> = {};
+  const section = () => js<string>(`document.getElementById("page-input").value`);
+  const openLook = () => js(`document.getElementById("look").hidden && document.getElementById("look-btn").click()`);
+  const closeLook = () => js(`document.getElementById("look").hidden || document.getElementById("look-btn").click()`);
+  const slide = (id: string, v: number) => js(`(() => { const r = document.getElementById("${id}"); r.value = "${v}"; r.dispatchEvent(new Event("input")); r.dispatchEvent(new Event("change")); })()`);
+  const current = `document.querySelector(".epub-section.current")`;
+
+  await js(`document.getElementById("panel-btn").getAttribute("aria-pressed") === "true" && document.getElementById("panel-btn").click()`);
+  await pickLayout("Two pages");
+  await js(`(() => { const i = document.getElementById("page-input"); i.value = "4"; i.dispatchEvent(new Event("change")); })()`);
+  await pause(500);
+
+  // Customize: spacing, justification and margins reach the page; Reset puts them back.
+  await openLook();
+  await js(`document.getElementById("look-open-customize").click()`);
+  await pause(200);
+  const boxBefore = await js<number>(`document.getElementById("pages").getBoundingClientRect().width`);
+  await slide("look-line", 2);
+  await js(`document.getElementById("look-justify").click(); document.querySelector('#look-margins [data-id="wide"]').click()`);
+  await pause(500);
+  const custom = await js<{ lineRatio: number; align: string; box: number; sheetShown: boolean }>(`(() => {
+    const s = ${current}, p = s.querySelector("p");
+    return { lineRatio: parseFloat(getComputedStyle(p).lineHeight) / parseFloat(getComputedStyle(p).fontSize), align: getComputedStyle(p).textAlign,
+      box: document.getElementById("pages").getBoundingClientRect().width, sheetShown: !document.getElementById("look-customize").hidden };
+  })()`);
+  await shot("epub-10-customize");
+  await js(`document.getElementById("look-reset").click()`);
+  await pause(500);
+  const reset = await js<{ lineRatio: number; align: string }>(`(() => { const p = ${current}.querySelector("p"); return { lineRatio: parseFloat(getComputedStyle(p).lineHeight) / parseFloat(getComputedStyle(p).fontSize), align: getComputedStyle(p).textAlign }; })()`);
+  await js(`document.getElementById("look-close-customize").click()`);
+  results.customize = custom.sheetShown && Math.abs(custom.lineRatio - 2) < 0.05 && custom.align === "justify" && custom.box < boxBefore - 20 && Math.abs(reset.lineRatio - 1.6) < 0.05 && reset.align !== "justify";
+  console.log(`[selftest] epub customize ok=${results.customize}`, JSON.stringify({ boxBefore, custom, reset }));
+
+  // A book can keep its own look; turning that off goes back to the usual one.
+  const bg = () => js<string>(`getComputedStyle(document.getElementById("viewer")).backgroundColor`);
+  const usualBg = await bg();
+  await js(`document.getElementById("look-this-book").click(); document.querySelector('.look-color[title="Sepia page"]').click()`);
+  await pause(200);
+  const own = { bg: await bg(), saved: await js<boolean>(`Object.keys(JSON.parse(localStorage.getItem("visual-reader:reading-look-books") || "{}")).length > 0`) };
+  await js(`document.getElementById("look-this-book").click()`);
+  await pause(300);
+  const backToUsual = await bg();
+  results.perBook = own.bg === "rgb(246, 238, 220)" && own.saved && backToUsual === usualBg;
+  console.log(`[selftest] epub this book only ok=${results.perBook}`, JSON.stringify({ usualBg, own, backToUsual }));
+
+  // Night in dark mode: the page goes Night while the system is dark.
+  const { nativeTheme } = await import("electron");
+  const themeBefore = nativeTheme.themeSource;
+  await js(`document.getElementById("look-auto-night").click()`);
+  nativeTheme.themeSource = "dark";
+  await pause(400);
+  const darkBg = await bg();
+  nativeTheme.themeSource = "light";
+  await pause(400);
+  const lightBg = await bg();
+  nativeTheme.themeSource = themeBefore;
+  await js(`document.getElementById("look-auto-night").click()`);
+  await closeLook();
+  results.autoNight = darkBg === "rgb(17, 18, 20)" && lightBg !== darkBg;
+  console.log(`[selftest] epub night in dark mode ok=${results.autoNight}`, JSON.stringify({ darkBg, lightBg }));
+
+  // The whole book's pages get counted; the footer shows the pages and what's left in the chapter.
+  const counted = await waitFor(`/^Pages? \\d+(–\\d+)? of \\d+$/.test(document.getElementById("epub-pages").textContent)`, 15_000);
+  const footer = await js<{ pages: string; left: string; navHidden: boolean }>(`({ pages: document.getElementById("epub-pages").textContent, left: document.getElementById("epub-left").textContent, navHidden: document.getElementById("nav").hidden })`);
+  results.footer = counted && /left in chapter|Last page in chapter/.test(footer.left) && footer.navHidden;
+  console.log(`[selftest] epub page count and footer ok=${results.footer}`, JSON.stringify(footer));
+
+  // A recount (here, after bigger text) keeps page numbers showing while it runs, then settles on new ones.
+  await js(`document.getElementById("look-btn").click(); document.getElementById("look-larger").click()`);
+  await pause(80);
+  const duringRecount = await js<string>(`document.getElementById("epub-pages").textContent`);
+  await pause(1500);
+  const afterRecount = await js<string>(`document.getElementById("epub-pages").textContent`);
+  await js(`document.getElementById("look-smaller").click(); document.getElementById("look-btn").click()`);
+  await pause(1500);
+  results.recount = /^Pages? \d/.test(duringRecount) && /^Pages? \d/.test(afterRecount) && afterRecount !== footer.pages;
+  console.log(`[selftest] epub page numbers stay through a recount ok=${results.recount}`, JSON.stringify({ before: footer.pages, duringRecount, afterRecount }));
+
+  // The progress bar jumps; "Back to" returns to where you were and goes away.
+  const from = await section();
+  await js(`(() => {
+    const s = document.getElementById("scrubber"), r = s.getBoundingClientRect();
+    const at = { clientX: r.left + r.width * 0.75, clientY: r.top + r.height / 2, pointerId: 1, bubbles: true, button: 0 };
+    s.dispatchEvent(new PointerEvent("pointerdown", at));
+    s.dispatchEvent(new PointerEvent("pointerup", at));
+  })()`);
+  await pause(600);
+  const scrubbed = { section: await section(), back: await js<string | null>(`document.getElementById("back-pill").hidden ? null : document.getElementById("back-label").textContent`) };
+  await shot("epub-11-scrubbed");
+  await js(`document.getElementById("back-pill").click()`);
+  await pause(600);
+  const returned = { section: await section(), backHidden: await js<boolean>(`document.getElementById("back-pill").hidden`) };
+  results.scrub = Number(scrubbed.section) > Number(from) + 2 && !!scrubbed.back && returned.section === from && returned.backHidden;
+  console.log(`[selftest] epub progress bar and back ok=${results.scrub}`, JSON.stringify({ from, scrubbed, returned }));
+
+  // On the bar, → goes to the next chapter without leaving a "Back to".
+  const beforeArrow = await section();
+  await js(`(() => { const s = document.getElementById("scrubber"); s.focus(); s.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })); })()`);
+  await pause(500);
+  const arrowed = { section: await section(), backHidden: await js<boolean>(`document.getElementById("back-pill").hidden`) };
+  await js(`document.getElementById("scrubber").blur()`);
+  results.chapterArrow = Number(arrowed.section) === Number(beforeArrow) + 1 && arrowed.backHidden;
+  console.log(`[selftest] epub chapter arrow on the bar ok=${results.chapterArrow}`, JSON.stringify({ beforeArrow, arrowed }));
+
+  // Search: ⌘F opens it, results come in by chapter, Return goes to one and marks it, Escape clears the marks.
+  await js(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true }))`);
+  await pause(200);
+  await js(`(() => { const i = document.getElementById("search-input"); i.value = "rabbit"; i.dispatchEvent(new Event("input")); })()`);
+  await pause(400);
+  const listed = await js<{ open: boolean; focused: boolean; results: number; chapters: number; summary: string }>(`({
+    open: !document.getElementById("search").hidden, focused: document.activeElement?.id === "search-input",
+    results: document.querySelectorAll(".search-result").length, chapters: document.querySelectorAll(".search-chapter").length,
+    summary: document.getElementById("search-summary").textContent })`);
+  await js(`document.getElementById("search-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))`);
+  await pause(500);
+  const found = await js<{ count: string; marked: boolean; shown: boolean }>(`(() => {
+    const hl = CSS.highlights.get("search-current"); const range = hl && [...hl][0];
+    const r = range?.getBoundingClientRect(), box = document.getElementById("pages").getBoundingClientRect();
+    return { count: document.getElementById("search-count").textContent, marked: !!range && /rabbit/i.test(range.toString()), shown: !!r && r.left >= box.left - 1 && r.right <= box.right + 1 };
+  })()`);
+  await shot("epub-12-search");
+  await js(`document.getElementById("search-input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await pause(200);
+  const cleared = await js<boolean>(`document.getElementById("search").hidden && !CSS.highlights.has("search-hit")`);
+  results.search = listed.open && listed.focused && listed.results > 5 && listed.chapters > 1 && /of \d+$/.test(found.count) && found.marked && found.shown && cleared;
+  console.log(`[selftest] epub search ok=${results.search}`, JSON.stringify({ listed, found, cleared }));
+
+  // The toolbar rests while you read, and the pointer at the top brings it back.
+  await js(`document.activeElement?.blur(); document.dispatchEvent(new MouseEvent("mousemove", { clientY: 10, bubbles: true }))`);
+  const rested = await waitFor(`document.body.classList.contains("reading-focus")`, 6_000);
+  await pause(600);
+  await shot("epub-13-focus");
+  await js(`document.dispatchEvent(new MouseEvent("mousemove", { clientY: 10, bubbles: true }))`);
+  const woke = await js<boolean>(`!document.body.classList.contains("reading-focus")`);
+  results.focus = rested && woke;
+  console.log(`[selftest] epub toolbar rests ok=${results.focus}`, JSON.stringify({ rested, woke }));
+
+  // Full screen tucks the explanations panel away, and brings it back after.
+  await js(`document.getElementById("panel-btn").click()`);
+  await pause(300);
+  const panelShown = () => js<boolean>(`!document.getElementById("panel").hidden`);
+  const beforeFull = await panelShown();
+  win.setFullScreen(true);
+  await waitFor(`document.documentElement.classList.contains("fullscreen")`, 5_000);
+  await pause(800);
+  const inFull = await panelShown();
+  win.setFullScreen(false);
+  await waitFor(`!document.documentElement.classList.contains("fullscreen")`, 5_000);
+  await pause(800);
+  const afterFull = await panelShown();
+  results.fullScreen = beforeFull && !inFull && afterFull;
+  console.log(`[selftest] epub full screen hides the panel ok=${results.fullScreen}`, JSON.stringify({ beforeFull, inFull, afterFull }));
+  return Object.values(results).every(Boolean);
 }

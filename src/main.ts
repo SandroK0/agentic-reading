@@ -8,10 +8,13 @@ import { ExplanationCards, type CardScope } from "./cards";
 import { resizableSidebar } from "./resize";
 import { enableTextSelection } from "./selection";
 import { collectContentsSource } from "./contents-source";
-import { Contents, pdfOutline } from "./toc";
-import { EpubView, parseEpub } from "./epub";
+import { Contents, pdfOutline, type ContentsNode } from "./toc";
+import { EpubView, parseEpub, type EpubTarget } from "./epub";
 import { setupReadingLook } from "./reading-look";
 import { closeWhenDismissed } from "./popover";
+import { BookProgress, type ChapterStart } from "./book-progress";
+import { BookSearch } from "./search";
+import { restingToolbar } from "./resting-toolbar";
 import "./style.css";
 
 declare global {
@@ -56,7 +59,7 @@ const tocEl = $("toc");
 const layoutEl = tocEl.closest<HTMLElement>(".layout")!;
 const tocBtn = $<HTMLButtonElement>("toc-btn");
 const contents = new Contents(tocBody, (page, anchor) => {
-  goTo(page, { anchor });
+  jumpTo(page, { anchor });
   if (tocIsDropdown()) setTocVisible(false);
 }, {
   async generate(onProgress, signal) {
@@ -89,8 +92,28 @@ const turnNext = $<HTMLButtonElement>("turn-next");
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 
+const bookProgress = new BookProgress($("epub-footer"), epubView, (section, within, remember) =>
+  (remember ? jumpTo : goTo)(section, { fraction: within }),
+);
+const bookSearch = new BookSearch($("search-anchor"), $<HTMLButtonElement>("search-btn"), $("search"), epubView, {
+  chapterTitle: (section) => bookProgress.chapterTitle(section),
+  // Stepping through results doesn't pile up "Back to" places: only the first remembers where you were reading.
+  onJump: (section, range, first) => (first ? jumpTo : goTo)(section, { range }),
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "f" && book && view === epubView) {
+    e.preventDefault();
+    bookSearch.open();
+  }
+});
+epubView.onPagesCounted = () => {
+  bookProgress.pagesCounted();
+  showTurnButtons();
+};
+
 const readingLook = setupReadingLook({
-  area: viewer.closest<HTMLElement>(".reader-area")!,
+  // The whole window, so the toolbar can take the page colour while it rests (only EPUB styles read these).
+  area: document.body,
   anchor: $("look-anchor"),
   button: $<HTMLButtonElement>("look-btn"),
   popover: $("look"),
@@ -133,10 +156,24 @@ let view: Pages | EpubView = pages;
 
 const BOOK_FILE = /\.(pdf|epub)$/i;
 
-/** Scrolls to a page; in an EPUB also to an anchor or a quoted passage within it. */
-function goTo(page: number, target: { anchor?: string; passage?: string } = {}) {
+/** Scrolls to a page; in an EPUB also to an anchor, a quoted passage, or a fraction of the way through it. */
+function goTo(page: number, target: EpubTarget = {}) {
   if (view instanceof EpubView) view.goTo(page, target);
   else view.goTo(page);
+}
+
+/** A jump somewhere else in the book (contents, an explanation card, search, the progress bar): an EPUB offers a way back. */
+function jumpTo(page: number, target: EpubTarget = {}) {
+  if (view === epubView) bookProgress.noteJump();
+  goTo(page, target);
+}
+
+/** The book's contents as the places the progress bar names and marks. */
+function chapterStarts(nodes: ContentsNode[], depth = 0): ChapterStart[] {
+  return nodes.flatMap((n) => [
+    ...(n.page ? [{ section: n.page, title: n.title.trim(), topLevel: depth === 0 }] : []),
+    ...chapterStarts(n.items, depth + 1),
+  ]);
 }
 
 // ---------- Opening books ----------
@@ -199,7 +236,8 @@ async function openBook(path: string) {
   pageInput.title = epub ? "Section of the book (usually a chapter)" : "";
   prevBtn.setAttribute("aria-label", `Previous ${unit.toLowerCase()}`);
   nextBtn.setAttribute("aria-label", `Next ${unit.toLowerCase()}`);
-  nav.hidden = false;
+  // EPUBs have their own footer: the progress bar and page count (see BookProgress).
+  nav.hidden = !!epub;
   emptyEl.hidden = true;
   pagesEl.hidden = false;
   tocBtn.hidden = false;
@@ -222,6 +260,9 @@ async function openBook(path: string) {
   if (epub) {
     pages.clear();
     view = epubView;
+    // Before it loads (and with the last book gone), so the book opens with its own look if it keeps one.
+    epubView.clear();
+    readingLook.setBook(path);
     await epubView.load(epub, state.page);
   } else {
     epubView.clear();
@@ -229,6 +270,9 @@ async function openBook(path: string) {
     await pages.load(pdf!, state.page);
   }
   readingLook.setAvailable(!!epub);
+  bookProgress.setBook(epub ? chapterStarts(epub.contents) : null);
+  bookSearch.setBook(!!epub);
+  toolbar.wake();
   if (epub) readingLook.sizeChanged(epubView.zoomLevel);
   zoomLabel.textContent = `${Math.round(view.zoomLevel * 100)}%`;
   showTurnButtons();
@@ -391,6 +435,10 @@ async function closeBook() {
   pagesEl.hidden = true;
   nav.hidden = true;
   readingLook.setAvailable(false);
+  readingLook.setBook(null);
+  bookProgress.setBook(null);
+  bookSearch.setBook(false);
+  toolbar.wake();
   showTurnButtons();
   tocEl.hidden = true;
   tocBtn.hidden = true;
@@ -424,7 +472,10 @@ function showPage(n: number) {
   progressPct.textContent = `${pct}%`;
   progressBar.style.width = `${pct}%`;
   prevBtn.disabled = n <= 1;
-  if (book.kind === "epub") showTurnButtons();
+  if (book.kind === "epub") {
+    showTurnButtons();
+    bookProgress.update();
+  }
   nextBtn.disabled = n >= book.pageCount;
   clearTimeout(savePageTimer);
   const path = book.path;
@@ -455,7 +506,21 @@ viewer.addEventListener(
 
 // On macOS the window buttons sit inside the toolbar (see createWindow); make room for them.
 document.documentElement.classList.toggle("inset-titlebar", api.platform === "darwin");
-api.onFullscreen((fullscreen) => document.documentElement.classList.toggle("fullscreen", fullscreen));
+// Full screen with an EPUB is for reading: the explanations panel and the contents tuck away, and the panel comes back after.
+let panelBeforeFullscreen = false;
+api.onFullscreen((fullscreen) => {
+  document.documentElement.classList.toggle("fullscreen", fullscreen);
+  if (fullscreen && book?.kind === "epub") {
+    setTocVisible(false);
+    if (panelWindow.place === "docked") {
+      panelBeforeFullscreen = true;
+      panelWindow.hide();
+    }
+  } else if (!fullscreen && panelBeforeFullscreen) {
+    panelBeforeFullscreen = false;
+    panelWindow.dock();
+  }
+});
 
 // ---------- Theme ----------
 
@@ -538,6 +603,13 @@ function setSettingsOpen(open: boolean) {
 }
 settingsBtn.onclick = () => setSettingsOpen(settingsEl.hidden);
 closeWhenDismissed(settingsEl, settingsBtn, () => !settingsEl.hidden, () => setSettingsOpen(false));
+
+// ---------- Focus ----------
+
+const toolbar = restingToolbar(document.querySelector<HTMLElement>(".toolbar")!, {
+  canRest: () => book?.kind === "epub",
+  isBusy: () => !!document.querySelector(".popover:not([hidden])") || (tocIsDropdown() && !tocEl.hidden) || !selectionMenu.hidden,
+});
 
 // ---------- Contents sidebar ----------
 
@@ -704,7 +776,7 @@ function storedScope(): CardScope {
 
 const explanations = new ExplanationCards(cardsEl, cardsEmpty, { all: $("count"), page: $("count-page") }, {
   api,
-  goTo: (page, passage) => goTo(page, { passage }),
+  goTo: (page, passage) => jumpTo(page, { passage }),
   pageLabel: (page) =>
     book?.kind === "epub"
       ? { short: `§ ${page}`, title: "Go to this passage" }
@@ -773,7 +845,7 @@ homeBtn.onclick = () => void closeBook();
 
 prevBtn.onclick = () => goTo(view.current - 1);
 nextBtn.onclick = () => goTo(view.current + 1);
-pageInput.onchange = () => goTo(Number(pageInput.value));
+pageInput.onchange = () => jumpTo(Number(pageInput.value));
 $("zoom-in").onclick = () => setZoom(view.zoomLevel + 0.25);
 $("zoom-out").onclick = () => setZoom(view.zoomLevel - 0.25);
 

@@ -29,9 +29,32 @@
     </div>
 
     <div class="tb-group">
+      <div class="popover-anchor" id="search-anchor" hidden>
+        <button class="icon-btn" id="search-btn" title="Search in book (⌘F)" aria-label="Search in book" aria-haspopup="dialog" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></svg>
+        </button>
+        <div class="popover search" id="search" role="dialog" aria-label="Search in book" hidden>
+          <div class="search-head">
+            <label class="search-field">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></svg>
+              <input id="search-input" type="search" placeholder="Search in book" aria-label="Search in book" autocomplete="off" spellcheck="false">
+              <span id="search-count"></span>
+            </label>
+            <div class="search-nav">
+              <span id="search-summary"></span>
+              <span>
+                <button class="icon-btn" id="search-prev" title="Previous result (⇧Return)" aria-label="Previous result"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6" /></svg></button>
+                <button class="icon-btn" id="search-next" title="Next result (Return)" aria-label="Next result"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg></button>
+              </span>
+            </div>
+          </div>
+          <div class="search-results" id="search-results" hidden></div>
+        </div>
+      </div>
       <div class="popover-anchor" id="look-anchor" hidden>
         <button class="icon-btn look-btn" id="look-btn" title="Text and layout" aria-label="Text and layout" aria-haspopup="dialog" aria-expanded="false">Aa</button>
         <div class="popover look" id="look" role="dialog" aria-label="Text and layout" hidden>
+          <div id="look-main">
           <section>
             <div class="look-size">
               <button class="small" id="look-smaller" title="Smaller text" aria-label="Smaller text">A</button>
@@ -42,6 +65,7 @@
           <section>
             <div class="popover-head"><h2>Page</h2></div>
             <div class="look-colors" id="look-colors" role="radiogroup" aria-label="Page colour"></div>
+            <button class="look-switch" id="look-auto-night" role="switch" aria-checked="false" title="Use the Night page while your Mac is in dark mode"><span>Night in dark mode</span><i aria-hidden="true"></i></button>
           </section>
           <section>
             <div class="popover-head"><h2>Layout</h2></div>
@@ -56,6 +80,42 @@
             <div class="popover-head"><h2>Font</h2></div>
             <div class="model-list look-fonts" id="look-fonts" role="radiogroup" aria-label="Font"></div>
           </section>
+          <button class="look-row" id="look-open-customize">
+            <span>Customize</span>
+            <span class="look-row-hint">Spacing, margins <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6" /></svg></span>
+          </button>
+          <div class="popover-foot look-foot">
+            <button class="look-switch" id="look-this-book" role="switch" aria-checked="false" title="Keep these settings for this book only; other books use the usual ones"><span>Only for this book</span><i aria-hidden="true"></i></button>
+          </div>
+          </div>
+
+          <div id="look-customize" hidden>
+            <div class="look-sub-head">
+              <button id="look-close-customize">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6l-6 6 6 6" /></svg>
+                Back
+              </button>
+              <h2>Customize</h2>
+            </div>
+            <section>
+              <label class="look-slider"><span><b>Line spacing</b><span id="look-line-label"></span></span><input type="range" id="look-line" min="1.2" max="2.2" step="0.05" aria-label="Line spacing"></label>
+              <label class="look-slider"><span><b>Character spacing</b><span id="look-letter-label"></span></span><input type="range" id="look-letter" min="-2" max="8" step="1" aria-label="Character spacing"></label>
+              <label class="look-slider"><span><b>Word spacing</b><span id="look-word-label"></span></span><input type="range" id="look-word" min="0" max="40" step="5" aria-label="Word spacing"></label>
+            </section>
+            <section>
+              <div class="popover-head"><h2>Margins</h2></div>
+              <div class="look-segmented" id="look-margins" role="radiogroup" aria-label="Margins"></div>
+            </section>
+            <section class="look-switches">
+              <button class="look-switch" id="look-justify" role="switch" aria-checked="false"><span>Justify text</span><i aria-hidden="true"></i></button>
+              <button class="look-switch" id="look-hyphenate" role="switch" aria-checked="false"><span>Hyphenation</span><i aria-hidden="true"></i></button>
+              <button class="look-switch" id="look-bold" role="switch" aria-checked="false"><span>Bold text</span><i aria-hidden="true"></i></button>
+            </section>
+            <div class="popover-foot look-foot">
+              <span>Spacing, margins and text</span>
+              <button id="look-reset">Reset</button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="popover-anchor">
@@ -130,6 +190,23 @@
       <button class="page-turn next" id="turn-next" title="Next page" aria-label="Next page" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
       </button>
+
+      <footer class="epub-footer" id="epub-footer" hidden>
+        <div class="scrubber" id="scrubber" role="slider" tabindex="0" aria-label="Position in the book" aria-valuemin="0" aria-valuemax="100">
+          <div class="scrubber-track"><div class="scrubber-fill" id="scrubber-fill"></div></div>
+          <div class="scrubber-ticks" id="scrubber-ticks" aria-hidden="true"></div>
+          <div class="scrubber-thumb" id="scrubber-thumb" aria-hidden="true"></div>
+          <div class="scrubber-tip" id="scrubber-tip" role="tooltip" hidden></div>
+        </div>
+        <div class="epub-footer-row">
+          <button class="back-pill" id="back-pill" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 0 10h-3" /></svg>
+            <span id="back-label"></span>
+          </button>
+          <span class="epub-footer-pages" id="epub-pages"></span>
+          <span class="epub-footer-left" id="epub-left"></span>
+        </div>
+      </footer>
 
       <div class="pagebar" id="nav" role="toolbar" aria-label="Page and zoom" hidden>
         <button id="prev" aria-label="Previous page">

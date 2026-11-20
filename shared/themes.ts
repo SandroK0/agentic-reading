@@ -43,6 +43,10 @@ const SHARED_LIGHT: Palette = {
   "field-bg": "var(--canvas)",
   hover: "var(--surface)",
   "page-shadow": "0 0 0 0.5px rgba(15, 20, 30, 0.10), 0 2px 10px rgba(15, 20, 30, 0.07)",
+  /** Search matches in an EPUB: every match, and the one you're on. */
+  "search-hit": "rgba(234, 179, 8, 0.35)",
+  "search-current": "#eab308",
+  "search-current-text": "#1d1608",
 };
 
 const SHARED_DARK: Palette = {
@@ -60,6 +64,7 @@ const SHARED_DARK: Palette = {
   "field-bg": "var(--bg)",
   hover: "rgba(255, 255, 255, 0.06)",
   "page-shadow": "0 0 0 0.5px rgba(255, 255, 255, 0.06), 0 4px 18px rgba(0, 0, 0, 0.45)",
+  "search-hit": "rgba(234, 179, 8, 0.4)",
 };
 
 export const THEMES: Theme[] = [

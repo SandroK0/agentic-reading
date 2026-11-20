@@ -43,10 +43,34 @@ export const DEFAULT_MEASURE = 32;
  */
 export type EpubLayout = "scroll" | "single" | "double";
 
-/** Room left around the pages when paginated: the edges take clicks to turn, the bottom holds the page bar. */
-const PAGED_SIDE = 64;
+/** A place in the book: the section number plus how far through it, e.g. 4.25 is a quarter into section 4. */
+export type EpubPosition = number;
+
+/** Where in a section to go: a fraction of the way through, an anchor, a quoted passage, or an exact range. */
+export interface EpubTarget {
+  fraction?: number;
+  anchor?: string;
+  passage?: string;
+  range?: Range;
+}
+
+const sum = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0);
+
+/**
+ * How much room the text gets around it. Paginated, that's the space beside
+ * the pages (which also takes clicks to turn) and the two-page gutter and
+ * width; scrolling, it's the sheet's side padding.
+ */
+export type EpubMargins = "narrow" | "normal" | "wide";
+const MARGINS: Record<EpubMargins, { side: number; gutter: number; spread: number; padding: number }> = {
+  narrow: { side: 32, gutter: 2.5, spread: 78, padding: 1.6 },
+  normal: { side: 64, gutter: 3.5, spread: 70, padding: 3.2 },
+  wide: { side: 120, gutter: 5, spread: 60, padding: 5 },
+};
+
+/** Room left above and below the pages when paginated (the page count and progress bar sit below the viewer). */
 const PAGED_TOP = 36;
-const PAGED_BOTTOM = 60;
+const PAGED_BOTTOM = 20;
 /** How much wheel or trackpad travel turns one page, and how long a gesture must pause before the next can. */
 const SWIPE_DISTANCE = 40;
 const SWIPE_PAUSE_MS = 250;
@@ -147,11 +171,26 @@ export class EpubView {
   private urls: string[] = [];
   private zoom = 1;
   private measure = DEFAULT_MEASURE;
+  private margins: EpubMargins = "normal";
   private scrollQueued = false;
   private layout: EpubLayout = "scroll";
   /** Paginated only: which spread of the current section is showing, out of how many, and how far apart they are. */
   private spread = 0;
   private spreads = 1;
+  /** Paginated: columns per spread (two pages, or one). */
+  private pagesPerSpread = 1;
+  /**
+   * Paginated: how many pages each section has, from the last complete count
+   * of the whole book. A recount (after a resize or a setting change) runs in
+   * the background and replaces it only when it's done, so page numbers never
+   * disappear meanwhile; the section you're on is kept up to date as you go.
+   * Scrolling, or before the first count is in, progress is measured in characters.
+   */
+  private pageCounts: number[] | null = null;
+  private charCounts: number[] = [];
+  private countToken = 0;
+  /** Called when the whole-book page count is ready, and whenever it changes. */
+  onPagesCounted: () => void = () => {};
   private step = 1;
   private swipe = { travel: 0, locked: false, timer: undefined as ReturnType<typeof setTimeout> | undefined };
   current = 1;
@@ -197,6 +236,11 @@ export class EpubView {
     }, { passive: true });
   }
 
+  /** The sections' sheets, in reading order (for searching them). */
+  get sections(): readonly HTMLElement[] {
+    return this.sheets;
+  }
+
   /** True when the book is paginated rather than scrolling. */
   get paged() {
     return this.layout !== "scroll";
@@ -237,6 +281,7 @@ export class EpubView {
       return sheet;
     });
     this.container.replaceChildren(...this.sheets);
+    this.charCounts = this.sheets.map((s) => Math.max(1, s.textContent?.length ?? 0));
     this.applyLayout();
     // Images change the height of everything after them, so wait for them before scrolling to a saved spot.
     await Promise.race([
@@ -262,6 +307,9 @@ export class EpubView {
     this.sheets = [];
     for (const url of this.urls) URL.revokeObjectURL(url);
     this.urls = [];
+    this.countToken++;
+    this.pageCounts = null;
+    this.charCounts = [];
     this.container.classList.remove("epub", "paged");
     this.viewer.classList.remove("epub-paged");
     for (const prop of ["--epub-font-size", "--epub-measure", "--page-w", "--page-h", "--cols", "--gap"]) this.container.style.removeProperty(prop);
@@ -310,11 +358,12 @@ export class EpubView {
   }
 
   /** Scrolls to a section: its start, a fraction through it, an anchor in it, or the place a passage was quoted from. */
-  goTo(n: number, target: { fraction?: number; anchor?: string; passage?: string } = {}) {
+  goTo(n: number, target: EpubTarget = {}) {
     if (!this.sheets.length) return;
     const index = Math.min(Math.max(1, Math.round(n) || 1), this.sheets.length);
     const sheet = this.sheets[index - 1];
     const find = () =>
+      target.range ||
       (target.anchor && sheet.querySelector(`[data-anchor="${CSS.escape(target.anchor)}"]`)) ||
       (target.passage && findText(sheet, target.passage));
     if (this.paged) {
@@ -335,7 +384,7 @@ export class EpubView {
   }
 
   /** Where you are: the current section plus how far through it, e.g. 4.25. */
-  position(): number {
+  position(): EpubPosition {
     const sheet = this.sheets[this.current - 1];
     if (!sheet) return 1;
     if (this.paged) return this.current + Math.min(0.999, this.spread / this.spreads);
@@ -344,6 +393,12 @@ export class EpubView {
   }
 
   /** Sets how wide the text runs in Scroll and Single (in ems), keeping your place. Two pages ignores it. */
+  setMargins(margins: EpubMargins) {
+    if (margins === this.margins) return;
+    this.margins = margins;
+    this.relayout();
+  }
+
   setMeasure(ems: number) {
     const measure = Math.min(MAX_MEASURE, Math.max(MIN_MEASURE, ems));
     if (measure === this.measure) return;
@@ -373,6 +428,7 @@ export class EpubView {
   private applyZoom() {
     this.container.style.setProperty("--epub-font-size", `${BASE_FONT_PX * this.zoom}px`);
     this.container.style.setProperty("--epub-measure", String(this.measure));
+    this.container.style.setProperty("--epub-pad", String(MARGINS[this.margins].padding));
   }
 
   /**
@@ -389,12 +445,14 @@ export class EpubView {
     }
     if (!paged) return;
     const font = BASE_FONT_PX * this.zoom;
-    const room = this.viewer.clientWidth - 2 * PAGED_SIDE;
+    const margins = MARGINS[this.margins];
+    const room = this.viewer.clientWidth - 2 * margins.side;
     const two = this.layout === "double" && room >= font * 42;
-    const gap = Math.round(font * (two ? 3.5 : 3));
+    const gap = Math.round(font * (two ? margins.gutter : 3));
     // The Width setting is for Single and Scroll; Two pages that falls back to one keeps the default measure.
     const measure = this.layout === "single" ? this.measure : DEFAULT_MEASURE;
-    const width = Math.max(200, Math.floor(Math.min(room, font * (two ? 70 : measure))));
+    const width = Math.max(200, Math.floor(Math.min(room, font * (two ? margins.spread : measure))));
+    this.pagesPerSpread = two ? 2 : 1;
     const height = Math.max(200, this.viewer.clientHeight - PAGED_TOP - PAGED_BOTTOM);
     this.step = width + gap;
     const style = this.container.style;
@@ -402,6 +460,7 @@ export class EpubView {
     style.setProperty("--page-h", `${height}px`);
     style.setProperty("--cols", two ? "2" : "1");
     style.setProperty("--gap", `${gap}px`);
+    this.countPages();
   }
 
   /** Paginated: shows section `n` alone and counts its spreads. */
@@ -413,10 +472,121 @@ export class EpubView {
       if (!on) sheet.style.removeProperty("transform");
     }
     this.current = n;
-    const sheet = this.sheets[n - 1];
+    const pages = this.pagesIn(this.sheets[n - 1]);
+    this.spreads = Math.ceil(pages / this.pagesPerSpread);
+    if (this.pageCounts && this.pageCounts[n - 1] !== pages) {
+      this.pageCounts[n - 1] = pages;
+      this.onPagesCounted();
+    }
+  }
+
+  /** Paginated: how many pages (columns) a laid-out section fills, from where its text ends. */
+  private pagesIn(sheet: HTMLElement) {
     const end = sheet.querySelector(".epub-end");
     const offset = end ? end.getBoundingClientRect().left - sheet.getBoundingClientRect().left : 0;
-    this.spreads = Math.max(1, Math.floor((offset + 1) / this.step) + 1);
+    return Math.max(1, Math.floor((offset + 1) / (this.step / this.pagesPerSpread)) + 1);
+  }
+
+  /**
+   * Paginated: counts every section's pages, a few at a time between frames,
+   * on an invisible copy laid out in the same box. Starts over whenever the
+   * layout changes.
+   */
+  private countPages() {
+    const token = ++this.countToken;
+    const counts: number[] = [];
+    let next = 0;
+    const work = () => {
+      if (token !== this.countToken || !this.paged) return;
+      const until = performance.now() + 12;
+      while (next < this.sheets.length && performance.now() < until) {
+        const sheet = this.sheets[next];
+        if (sheet.classList.contains("current")) {
+          counts[next] = this.pagesIn(sheet);
+        } else {
+          const copy = sheet.cloneNode(true) as HTMLElement;
+          copy.className = "epub-section epub-measure";
+          copy.removeAttribute("data-page");
+          copy.style.removeProperty("transform");
+          this.container.append(copy);
+          counts[next] = this.pagesIn(copy);
+          copy.remove();
+        }
+        next++;
+      }
+      if (next < this.sheets.length) {
+        setTimeout(work, 0);
+      } else {
+        this.pageCounts = counts;
+        this.onPagesCounted();
+      }
+    };
+    setTimeout(work, 0);
+  }
+
+  /** Each section's share of the book: its pages once the book is counted, otherwise its length in characters. */
+  private weights(): { sizes: number[]; inPages: boolean } {
+    return this.paged && this.pageCounts ? { sizes: this.pageCounts, inPages: true } : { sizes: this.charCounts, inPages: false };
+  }
+
+  /**
+   * Where you are in the whole book: how far through (0 to 1), the pages
+   * showing and the book's page count (paginated, once counted), and how
+   * many pages (screens, when scrolling) are left before `chapterEnd`, the
+   * section the next chapter starts at.
+   */
+  progress(chapterEnd = this.current + 1): { fraction: number; pages: [number, number] | null; total: number | null; leftInChapter: number } {
+    const n = this.current;
+    const { sizes, inPages } = this.weights();
+    const total = sum(sizes) || 1;
+    const before = sum(sizes.slice(0, n - 1));
+    const fraction = Math.min(1, (before + (this.position() - n) * (sizes[n - 1] ?? 0)) / total);
+    const end = Math.min(Math.max(chapterEnd, n + 1), this.sheets.length + 1);
+    if (!this.paged) {
+      const last = this.sheets[end - 2];
+      const below = last ? this.top(last) + last.offsetHeight - (this.viewer.scrollTop + this.viewer.clientHeight) : 0;
+      return { fraction, pages: null, total: null, leftInChapter: Math.max(0, Math.ceil(below / Math.max(1, this.viewer.clientHeight))) };
+    }
+    const sectionPages = this.pageCounts?.[n - 1] ?? this.spreads * this.pagesPerSpread;
+    const first = this.spread * this.pagesPerSpread + 1;
+    const last = Math.min(sectionPages, first + this.pagesPerSpread - 1);
+    // The rest of the chapter's sections count once the book is counted; until then, only this section's.
+    const laterSections = this.pageCounts ? sum(this.pageCounts.slice(n, end - 1)) : 0;
+    return {
+      fraction,
+      pages: inPages ? [before + first, before + last] : null,
+      total: inPages ? total : null,
+      leftInChapter: Math.max(0, sectionPages - last) + laterSections,
+    };
+  }
+
+  /** The page a position is on, once the book is counted (paginated only); null otherwise. */
+  pageAt(position: EpubPosition): number | null {
+    if (!this.paged || !this.pageCounts) return null;
+    const n = Math.floor(position);
+    const pages = this.pageCounts[n - 1] ?? 1;
+    return sum(this.pageCounts.slice(0, n - 1)) + Math.min(pages, Math.floor((position - n) * pages) + 1);
+  }
+
+  /** The section and how far into it a point `fraction` of the way through the book is (for the progress bar). */
+  locate(fraction: number): { section: number; within: number; page: number | null } {
+    const { sizes, inPages } = this.weights();
+    const total = sum(sizes) || 1;
+    let at = Math.min(Math.max(0, fraction), 0.99999) * total;
+    for (let i = 0; i < sizes.length; i++) {
+      if (at < sizes[i] || i === sizes.length - 1) {
+        return { section: i + 1, within: Math.min(0.999, at / sizes[i]), page: inPages ? sum(sizes.slice(0, i)) + Math.floor(at) + 1 : null };
+      }
+      at -= sizes[i];
+    }
+    return { section: 1, within: 0, page: null };
+  }
+
+  /** Where each section starts, as a fraction of the book (for chapter marks on the progress bar). */
+  sectionStarts(): number[] {
+    const { sizes } = this.weights();
+    const total = sum(sizes) || 1;
+    return sizes.map((_, i) => sum(sizes.slice(0, i)) / total);
   }
 
   /** Paginated: moves the section sideways to `spread`, sliding there if `animate`. */
@@ -546,6 +716,17 @@ export class EpubView {
 function findText(root: Element, passage: string): Range | null {
   const needle = passage.replace(/\s+/g, " ").trim().slice(0, 80);
   if (!needle) return null;
+  const index = textIndex(root);
+  const at = index.flat.indexOf(needle);
+  return at < 0 ? null : index.range(at, at + 1);
+}
+
+/**
+ * The text under `root` with every run of whitespace as one space, and a way
+ * back from a stretch of it to a Range in the document. Finding passages and
+ * searching the book both match against this.
+ */
+export function textIndex(root: Element): { flat: string; range: (start: number, end: number) => Range } {
   let flat = "";
   const owners: { node: Node; offset: number }[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -558,12 +739,15 @@ function findText(root: Element, passage: string): Range | null {
       owners.push({ node, offset: i });
     }
   }
-  const at = flat.indexOf(needle);
-  if (at < 0) return null;
-  const range = document.createRange();
-  range.setStart(owners[at].node, owners[at].offset);
-  range.setEnd(owners[at].node, owners[at].offset + 1);
-  return range;
+  return {
+    flat,
+    range(start, end) {
+      const range = document.createRange();
+      range.setStart(owners[start].node, owners[start].offset);
+      range.setEnd(owners[end - 1].node, owners[end - 1].offset + 1);
+      return range;
+    },
+  };
 }
 
 function text(files: Record<string, Uint8Array>, filePath: string): string {
