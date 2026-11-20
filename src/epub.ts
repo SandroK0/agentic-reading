@@ -310,7 +310,7 @@ export class EpubView {
     this.countToken++;
     this.pageCounts = null;
     this.charCounts = [];
-    this.container.classList.remove("epub", "paged");
+    this.container.classList.remove("epub", "paged", "reflowing");
     this.viewer.classList.remove("epub-paged");
     for (const prop of ["--epub-font-size", "--epub-measure", "--page-w", "--page-h", "--cols", "--gap"]) this.container.style.removeProperty(prop);
     this.container.replaceChildren();
@@ -393,6 +393,20 @@ export class EpubView {
   }
 
   /** Sets how wide the text runs in Scroll and Single (in ems), keeping your place. Two pages ignores it. */
+  /**
+   * Fades the text out while the window or a sidebar is being resized, so
+   * the old layout isn't seen clipped and then snapping into the new one.
+   * Pair with `showAfterReflow` once `relayout` has run at the settled size.
+   */
+  hideForReflow() {
+    if (this.sheets.length) this.container.classList.add("reflowing");
+  }
+
+  /** Fades the text back in, on the next frame so the new layout is in place first. */
+  showAfterReflow() {
+    requestAnimationFrame(() => this.container.classList.remove("reflowing"));
+  }
+
   setMargins(margins: EpubMargins) {
     if (margins === this.margins) return;
     this.margins = margins;

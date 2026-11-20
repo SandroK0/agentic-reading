@@ -189,9 +189,22 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 5px; border-radi
  */
 .toolbar { transition: background-color 400ms, border-color 400ms; }
 .toolbar > * { transition: opacity 400ms; }
-body.reading-focus .toolbar { border-bottom-color: transparent; background: var(--canvas); }
-body.reading-focus:has(.viewer.epub-paged) .toolbar { background: var(--epub-bg, var(--bg)); }
+body.reading-focus .toolbar { border-bottom-color: transparent; background-color: var(--canvas); }
+body.reading-focus:has(.viewer.epub-paged) .toolbar { background-color: var(--epub-bg, var(--bg)); }
 body.reading-focus .toolbar > * { opacity: 0; }
+/*
+ * Above a docked explanations panel, the resting toolbar takes the panel's
+ * colour and edge instead, so the panel runs up to the top of the window
+ * rather than floating under a strip of page colour. --docked-panel-width
+ * is kept by main.ts (0 when the panel is hidden or in its own window).
+ * Painted as background layers, not an element: anything laid over the
+ * toolbar (it's the window's title bar) can take clicks meant for its buttons.
+ */
+body.reading-focus .toolbar {
+  background-image:
+    linear-gradient(to left, transparent calc(var(--docked-panel-width, 0px) - 1px), var(--border) 0 var(--docked-panel-width, 0px), transparent 0),
+    linear-gradient(to left, var(--bg) var(--docked-panel-width, 0px), transparent 0);
+}
 
 /* Rows that open the Customize sheet, and its header. */
 .look-row { width: 100%; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border: 0; border-top: 1px solid var(--border); border-radius: 0; font-weight: 500; }
@@ -226,7 +239,11 @@ body.reading-focus .toolbar > * { opacity: 0; }
 
 /* ---------- Layout ---------- */
 
-.layout { flex: 1; min-height: 0; display: flex; }
+/* Clips the explanations panel while it slides in from (or out to) the right edge. */
+.layout { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+
+/* The library, before a book is open, has nothing to explain: no panel, no button for it. */
+body.in-library :is(#panel, #panel-resizer, #panel-btn) { display: none; }
 
 /* A thin strip on a sidebar's inner edge; the hit area is wider than the line it shows. */
 .resizer {
@@ -385,7 +402,9 @@ body.resizing iframe { pointer-events: none; }
  * setting, in ems). The Customize settings arrive as --epub-* properties on
  * the reading area (see reading-look.ts).
  */
-.pages.epub { width: min(calc(var(--epub-font-size, 19px) * (var(--epub-measure, 32) + 2 * var(--epub-pad, 3.2))), 100%); }
+.pages.epub { width: min(calc(var(--epub-font-size, 19px) * (var(--epub-measure, 32) + 2 * var(--epub-pad, 3.2))), 100%); transition: opacity 260ms ease-out; }
+/* While the window or a sidebar resizes, the text fades out quickly; it's laid out again unseen and fades back in. */
+.pages.epub.reflowing { opacity: 0; transition: opacity 110ms ease-in; }
 .epub-section {
   width: 100%; box-sizing: border-box; padding: 3em calc(var(--epub-pad, 3.2) * 1em);
   background: var(--epub-bg, var(--bg)); color: var(--epub-text, var(--text)); box-shadow: var(--page-shadow);

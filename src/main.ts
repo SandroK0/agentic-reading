@@ -239,6 +239,7 @@ async function openBook(path: string) {
   // EPUBs have their own footer: the progress bar and page count (see BookProgress).
   nav.hidden = !!epub;
   emptyEl.hidden = true;
+  leaveLibrary();
   pagesEl.hidden = false;
   tocBtn.hidden = false;
   homeBtn.hidden = false;
@@ -276,6 +277,13 @@ async function openBook(path: string) {
   if (epub) readingLook.sizeChanged(epubView.zoomLevel);
   zoomLabel.textContent = `${Math.round(view.zoomLevel * 100)}%`;
   showTurnButtons();
+}
+
+/** A book is opening: the explanations panel (hidden in the library) slides in, if it's docked. */
+function leaveLibrary() {
+  if (!document.body.classList.contains("in-library")) return;
+  document.body.classList.remove("in-library");
+  if (panelWindow.place === "docked") panelWindow.slideIn();
 }
 
 // ---------- Library ----------
@@ -450,6 +458,7 @@ async function closeBook() {
   document.title = "Agentic Reading";
   explanations.show("", []);
   emptyEl.hidden = false;
+  document.body.classList.add("in-library");
   viewer.scrollTop = 0;
   await showLibrary();
 }
@@ -827,8 +836,19 @@ const panelWindow = new PanelWindow(panelEl, {
     popoutBtn.title = label;
     popoutBtn.setAttribute("aria-label", label);
     if (place === "window" && book) panelWindow.setTitle(`Explanations — ${book.title}`);
+    requestAnimationFrame(() => trackDockedPanel());
   },
 });
+/** How much of the window's right edge the docked panel takes, for the resting toolbar to match (see body.reading-focus .toolbar in style.css). */
+function trackDockedPanel() {
+  const box = panelEl.ownerDocument === document && !panelEl.hidden ? panelEl.getBoundingClientRect() : null;
+  // Its width, not its position: while it slides in it's still off the edge, but it ends up flush right.
+  const width = box ? box.width : 0;
+  document.body.style.setProperty("--docked-panel-width", `${width}px`);
+}
+new ResizeObserver(trackDockedPanel).observe(panelEl);
+window.addEventListener("resize", trackDockedPanel);
+
 popoutBtn.onclick = () => (panelWindow.place === "window" ? panelWindow.dock() : panelWindow.popOut());
 $("panel-close").onclick = () => panelWindow.hide();
 $("panel-collapse-all").onclick = () => explanations.toggleAll();
@@ -940,18 +960,25 @@ resizableSidebar($("panel"), $("panel-resizer"), {
 
 // Re-fit pages once the viewer's size settles, not on every frame of a sidebar drag.
 // Only paginated EPUBs care about the height: it decides how much fits on a page.
+// An EPUB's text fades out as soon as the size starts changing and back in once
+// it's laid out at the new size (the wait is longer than the fade-out, so the
+// reflow is never seen).
+const RESIZE_SETTLE_MS = 160;
 let lastWidth = 0;
 let lastHeight = 0;
 let relayoutTimer: ReturnType<typeof setTimeout> | undefined;
 new ResizeObserver(() => {
   const heightMatters = view === epubView && epubView.paged;
   if (Math.abs(viewer.clientWidth - lastWidth) < 4 && (!heightMatters || Math.abs(viewer.clientHeight - lastHeight) < 4)) return;
+  if (book && view === epubView) epubView.hideForReflow();
   clearTimeout(relayoutTimer);
   relayoutTimer = setTimeout(() => {
     lastWidth = viewer.clientWidth;
     lastHeight = viewer.clientHeight;
-    if (book) view.relayout();
-  }, 120);
+    if (!book) return;
+    view.relayout();
+    if (view === epubView) epubView.showAfterReflow();
+  }, RESIZE_SETTLE_MS);
 }).observe(viewer);
 
 /** Fills the model menu from the available providers, grouped when there's more than one. */

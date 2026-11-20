@@ -42,6 +42,8 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     // The library comes first, before any book is open.
     await waitFor(`!!document.querySelector("#empty > *")`, 10_000);
     await shot("0-library");
+    const libraryPanel = await js<{ panel: string; button: string }>(`({ panel: getComputedStyle(document.getElementById("panel")).display, button: getComputedStyle(document.getElementById("panel-btn")).display })`);
+    console.log(`[selftest] library has no explanations panel ok=${libraryPanel.panel === "none" && libraryPanel.button === "none"}`, JSON.stringify(libraryPanel));
     open(pdf);
     if (!(await waitFor(`document.getElementById("page-total").textContent !== "/ –"`, 30_000))) throw new Error("book never opened");
     // Back to the library and into the book again: the library now knows the book's title and length.
@@ -750,8 +752,9 @@ async function epubPagedTest(js: Js, pause: (ms: number) => Promise<unknown>, sh
   type State = { paged: boolean; section: string; columns: string | null; shift: number | null; turnsShown: boolean; scrollable: boolean; menu: boolean };
   const key = (k: string, shiftKey = false) => js(`document.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, shiftKey: ${shiftKey}, bubbles: true }))`);
 
-  // Two pages need a wide reader: hide the explanations while checking them.
+  // Two pages need a wide reader: hide the explanations while checking them (and let the panel finish sliding away).
   await js(`document.getElementById("panel-btn").click()`);
+  await pause(500);
   await pickLayout("Two pages");
   await pause(600);
   // Start from the top of a long section: the contents' fourth entry, as in the jump check.
@@ -1007,9 +1010,53 @@ async function epubReadingToolsTest(
   results.focus = rested && woke;
   console.log(`[selftest] epub toolbar rests ok=${results.focus}`, JSON.stringify({ rested, woke }));
 
+  // Resizing the window fades the text out, lays it out again unseen, and fades it back in at the same place.
+  const [w, h] = win.getSize();
+  const beforeResize = await section();
+  win.setSize(w - 240, h);
+  await pause(60);
+  const fadedDuring = await js<boolean>(`document.getElementById("pages").classList.contains("reflowing")`);
+  await pause(700);
+  const afterResize = await js<{ faded: boolean; opacity: string; section: string }>(`({
+    faded: document.getElementById("pages").classList.contains("reflowing"),
+    opacity: getComputedStyle(document.getElementById("pages")).opacity,
+    section: document.getElementById("page-input").value })`);
+  win.setSize(w, h);
+  await pause(700);
+  results.resizeFade = fadedDuring && !afterResize.faded && afterResize.opacity === "1" && afterResize.section === beforeResize;
+  console.log(`[selftest] epub text fades through a resize ok=${results.resizeFade}`, JSON.stringify({ fadedDuring, afterResize, beforeResize }));
+
+  // The toolbar's panel button, clicked for real (mouse down and up), shows the panel and then hides it again.
+  const realClick = async (id: string) => {
+    const at = await js<{ x: number; y: number }>(`(() => { const r = document.getElementById("${id}").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    for (const type of ["mouseMove", "mouseDown", "mouseUp"] as const) {
+      win.webContents.sendInputEvent({ type, x: Math.round(at.x), y: Math.round(at.y), button: "left", clickCount: 1 });
+    }
+  };
+  const panelState = () => js<{ hidden: boolean; away: boolean; pressed: string | null }>(`({ hidden: document.getElementById("panel").hidden, away: document.querySelector(".layout").classList.contains("panel-away"), pressed: document.getElementById("panel-btn").getAttribute("aria-pressed") })`);
+  const clicks = [await panelState()];
+  for (let i = 0; i < 4; i++) {
+    await realClick("panel-btn");
+    await pause(700);
+    clicks.push(await panelState());
+  }
+  results.panelButton = clicks.every((c, i) => i === 0 || c.hidden !== clicks[i - 1].hidden);
+  console.log(`[selftest] epub panel button toggles with real clicks ok=${results.panelButton}`, JSON.stringify(clicks));
+
+  // The panel slides back in, and slides out before it hides.
+  await js(`document.getElementById("panel-btn").click()`);
+  const slidesIn = await js<boolean>(`document.getElementById("panel").getAnimations().length > 0 && !document.getElementById("panel").hidden`);
+  await pause(400);
+  await js(`document.getElementById("panel-btn").click()`);
+  const slidesOut = await js<boolean>(`document.getElementById("panel").getAnimations().length > 0 && !document.getElementById("panel").hidden`);
+  await pause(400);
+  const goneAfter = await js<boolean>(`document.getElementById("panel").hidden`);
+  results.slide = slidesIn && slidesOut && goneAfter;
+  console.log(`[selftest] epub explanations panel slides ok=${results.slide}`, JSON.stringify({ slidesIn, slidesOut, goneAfter }));
+
   // Full screen tucks the explanations panel away, and brings it back after.
   await js(`document.getElementById("panel-btn").click()`);
-  await pause(300);
+  await pause(400);
   const panelShown = () => js<boolean>(`!document.getElementById("panel").hidden`);
   const beforeFull = await panelShown();
   win.setFullScreen(true);
@@ -1021,6 +1068,20 @@ async function epubReadingToolsTest(
   await pause(800);
   const afterFull = await panelShown();
   results.fullScreen = beforeFull && !inFull && afterFull;
+
+  // With the panel docked, the resting toolbar continues the panel to the top of the window.
+  await js(`document.activeElement?.blur(); document.dispatchEvent(new MouseEvent("mousemove", { clientY: 10, bubbles: true }))`);
+  const restedWithPanel = await waitFor(`document.body.classList.contains("reading-focus")`, 6_000);
+  await pause(600);
+  const strip = await js<{ strip: number; panel: number; layers: string; pseudo: string }>(`(() => {
+    const toolbar = getComputedStyle(document.querySelector(".toolbar"));
+    return { strip: parseFloat(getComputedStyle(document.body).getPropertyValue("--docked-panel-width")), panel: document.getElementById("panel").getBoundingClientRect().width,
+      layers: toolbar.backgroundImage, pseudo: getComputedStyle(document.querySelector(".toolbar"), "::after").content };
+  })()`);
+  await shot("epub-14-rest-with-panel");
+  // Nothing is laid over the toolbar's buttons: the strip is part of its background.
+  results.restWithPanel = restedWithPanel && Math.abs(strip.strip - strip.panel) < 2 && /linear-gradient/.test(strip.layers) && (strip.pseudo === "none" || strip.pseudo === "normal");
+  console.log(`[selftest] epub resting toolbar continues the panel ok=${results.restWithPanel}`, JSON.stringify(strip));
   console.log(`[selftest] epub full screen hides the panel ok=${results.fullScreen}`, JSON.stringify({ beforeFull, inFull, afterFull }));
   return Object.values(results).every(Boolean);
 }
