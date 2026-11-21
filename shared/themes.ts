@@ -47,6 +47,9 @@ const SHARED_LIGHT: Palette = {
   "search-hit": "rgba(234, 179, 8, 0.35)",
   "search-current": "#eab308",
   "search-current-text": "#1d1608",
+  /** Highlights you make, and bookmarks. */
+  "user-highlight": "rgba(250, 204, 21, 0.32)",
+  bookmark: "#c2410c",
 };
 
 const SHARED_DARK: Palette = {
@@ -65,6 +68,8 @@ const SHARED_DARK: Palette = {
   hover: "rgba(255, 255, 255, 0.06)",
   "page-shadow": "0 0 0 0.5px rgba(255, 255, 255, 0.06), 0 4px 18px rgba(0, 0, 0, 0.45)",
   "search-hit": "rgba(234, 179, 8, 0.4)",
+  "user-highlight": "rgba(250, 204, 21, 0.26)",
+  bookmark: "#f08a5d",
 };
 
 export const THEMES: Theme[] = [

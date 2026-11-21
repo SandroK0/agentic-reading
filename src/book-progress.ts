@@ -28,6 +28,7 @@ export class BookProgress {
   private readonly fill: HTMLElement;
   private readonly thumb: HTMLElement;
   private readonly ticks: HTMLElement;
+  private readonly marks: HTMLElement;
   private readonly tip: HTMLElement;
   private readonly pagesLabel: HTMLElement;
   private readonly leftLabel: HTMLElement;
@@ -45,6 +46,7 @@ export class BookProgress {
     this.fill = part("scrubber-fill");
     this.thumb = part("scrubber-thumb");
     this.ticks = part("scrubber-ticks");
+    this.marks = part("scrubber-marks");
     this.tip = part("scrubber-tip");
     this.pagesLabel = part("epub-pages");
     this.leftLabel = part("epub-left");
@@ -137,6 +139,17 @@ export class BookProgress {
   pagesCounted() {
     this.drawTicks();
     this.update();
+  }
+
+  /** Bookmarks, as fractions of the book, marked on the bar. */
+  setMarks(fractions: number[]) {
+    this.marks.replaceChildren(
+      ...fractions.map((f) => {
+        const mark = document.createElement("i");
+        mark.style.left = `${f * 100}%`;
+        return mark;
+      }),
+    );
   }
 
   /** The chapter a section belongs to, by name (for search results and the bar's tooltip). */

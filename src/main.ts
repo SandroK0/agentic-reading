@@ -15,6 +15,7 @@ import { closeWhenDismissed } from "./popover";
 import { BookProgress, type ChapterStart } from "./book-progress";
 import { BookSearch } from "./search";
 import { restingToolbar } from "./resting-toolbar";
+import { BookNotes } from "./annotations";
 import "./style.css";
 
 declare global {
@@ -109,6 +110,9 @@ document.addEventListener("keydown", (e) => {
 epubView.onPagesCounted = () => {
   bookProgress.pagesCounted();
   showTurnButtons();
+  // Page numbers in the Notes tab and bookmark marks on the bar move with the count.
+  bookNotes.render();
+  showBookmarkState();
 };
 
 const readingLook = setupReadingLook({
@@ -273,6 +277,8 @@ async function openBook(path: string) {
   readingLook.setAvailable(!!epub);
   bookProgress.setBook(epub ? chapterStarts(epub.contents) : null);
   bookSearch.setBook(!!epub);
+  bookmarkBtn.hidden = false;
+  bookNotes.setBook(state.annotations);
   toolbar.wake();
   if (epub) readingLook.sizeChanged(epubView.zoomLevel);
   zoomLabel.textContent = `${Math.round(view.zoomLevel * 100)}%`;
@@ -446,6 +452,8 @@ async function closeBook() {
   readingLook.setBook(null);
   bookProgress.setBook(null);
   bookSearch.setBook(false);
+  bookmarkBtn.hidden = true;
+  bookNotes.clear();
   toolbar.wake();
   showTurnButtons();
   tocEl.hidden = true;
@@ -485,6 +493,7 @@ function showPage(n: number) {
     showTurnButtons();
     bookProgress.update();
   }
+  showBookmarkState();
   nextBtn.disabled = n >= book.pageCount;
   clearTimeout(savePageTimer);
   const path = book.path;
@@ -726,6 +735,8 @@ function showMenu(rect: DOMRect, upward: boolean) {
 
 /** The selection the open menu is for. Kept, because focusing the question box clears the page selection. */
 let pendingSelection: { text: string; page: number } | null = null;
+/** The same selection as a Range, for highlighting it. */
+let pendingRange: Range | null = null;
 
 /**
  * Paints the menu's passage with the CSS Highlight API, so it stays marked
@@ -741,6 +752,7 @@ function markPending(range: Range | null) {
 function hideMenu() {
   selectionMenu.hidden = true;
   pendingSelection = null;
+  pendingRange = null;
   questionInput.value = "";
   markPending(null);
 }
@@ -760,6 +772,108 @@ async function surrounding(page: number, passage: string): Promise<string> {
   if (at < 0) return text.slice(0, PASSAGE_CONTEXT_CHARS * 2);
   return text.slice(Math.max(0, at - PASSAGE_CONTEXT_CHARS), at + passage.length + PASSAGE_CONTEXT_CHARS);
 }
+
+// ---------- Highlights, notes and bookmarks ----------
+
+const bookmarkBtn = $<HTMLButtonElement>("bookmark-btn");
+const bookmarkRibbon = $("bookmark-ribbon");
+const highlightLabel = $("highlight-label");
+
+const bookNotes = new BookNotes({
+  list: $("notes-list"),
+  filters: $("notes-filters"),
+  count: $("count-notes"),
+  exportButton: $<HTMLButtonElement>("notes-export"),
+  rootFor: (page) =>
+    book?.kind === "epub"
+      ? (epubView.sections[page - 1] ?? null)
+      : pagesEl.querySelector(`.page[data-page="${page}"] .textLayer`),
+  chapterTitle: (page) =>
+    book?.kind === "epub" ? bookProgress.chapterTitle(page) : (contents.chapterAt(page) ?? `Page ${page}`),
+  placeLabel: (page, fraction) => {
+    if (book?.kind !== "epub") return `p. ${page}`;
+    const counted = epubView.pageAt(page + fraction);
+    return counted ? `p. ${counted}` : `§ ${page}`;
+  },
+  goToHighlight: (h, range) => jumpTo(h.page, book?.kind === "epub" ? (range ? { range } : { passage: h.text }) : {}),
+  goToBookmark: (position) => jumpTo(Math.floor(position), book?.kind === "epub" ? { fraction: position % 1 } : {}),
+  explain: (h) => void explainPassage(h.page, h.text, "text"),
+  showNotes: () => {
+    if (panelWindow.place === "hidden") panelWindow.dock();
+    setPanelTab("notes");
+  },
+  save: (annotations) => book && void api.saveAnnotations(book.path, annotations),
+  exportMarkdown: (markdown) => book && void api.exportNotes(`${book.title} — notes.md`, markdown),
+  onBookmarksChanged: () => showBookmarkState(),
+  bookTitle: () => book?.title ?? "",
+});
+pages.onTextLayer = (page) => bookNotes.redraw(page);
+
+/** Highlights the selection the menu is for (or takes away the highlight it's on); with `withNote`, opens a note on it. */
+function markSelection(withNote: boolean) {
+  const sel = pendingSelection;
+  const range = pendingRange;
+  if (!sel || !range) return;
+  const existing = bookNotes.highlightAt(sel.page, range);
+  hideMenu();
+  window.getSelection()?.removeAllRanges();
+  if (existing && !withNote) {
+    bookNotes.remove(existing.id);
+    return;
+  }
+  const highlight = existing ?? bookNotes.addHighlight(sel.page, range);
+  if (highlight && withNote) bookNotes.editNote(highlight.id);
+}
+$("highlight-text").onclick = () => markSelection(false);
+$("note-text").onclick = () => markSelection(true);
+
+/** Where you're reading, as a bookmark stores it: an EPUB position, or a PDF page. */
+function readingPosition(): number {
+  return view === epubView ? epubView.position() : view.current;
+}
+
+/** Whether a bookmark's position is what's on screen now. */
+function isOnScreen(position: number): boolean {
+  return view === epubView ? epubView.showsPosition(position) : Math.floor(position) === view.current;
+}
+
+/** The toolbar button and the ribbon show whether you're on a bookmarked page; an EPUB's progress bar marks them all. */
+function showBookmarkState() {
+  const here = !!book && !!bookNotes.bookmarkHere(isOnScreen);
+  bookmarkBtn.setAttribute("aria-pressed", String(here));
+  const label = here ? "Remove this bookmark" : "Bookmark this page";
+  bookmarkBtn.title = `${label} (⌘D)`;
+  bookmarkBtn.setAttribute("aria-label", label);
+  bookmarkRibbon.hidden = !here;
+  bookProgress.setMarks(book?.kind === "epub" ? bookNotes.bookmarkPositions().map((p) => epubView.fractionOf(p)) : []);
+}
+
+function toggleBookmark() {
+  if (book) bookNotes.toggleBookmark(readingPosition(), isOnScreen);
+}
+bookmarkBtn.onclick = toggleBookmark;
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "d" && book) {
+    e.preventDefault();
+    toggleBookmark();
+  }
+});
+
+// The panel's two tabs: explanations, and your highlights, notes and bookmarks.
+type PanelTab = "explanations" | "notes";
+const panelTabs: Record<PanelTab, HTMLButtonElement> = { explanations: $("tab-explanations"), notes: $("tab-notes") };
+
+function setPanelTab(tab: PanelTab) {
+  for (const [t, b] of Object.entries(panelTabs)) b.setAttribute("aria-selected", String(t === tab));
+  const notes = tab === "notes";
+  $("notes-view").hidden = !notes;
+  cardsEl.hidden = notes;
+  $("scope-tabs").hidden = notes;
+  $("panel-collapse-all").hidden = notes;
+  $("panel-title").textContent = notes ? "Notes" : "Explanations";
+}
+panelTabs.explanations.onclick = () => setPanelTab("explanations");
+panelTabs.notes.onclick = () => setPanelTab("notes");
 
 // ---------- Explanations ----------
 
@@ -804,6 +918,7 @@ scopeButtons.all.onclick = () => explanations.setScope("all");
 
 async function explainPassage(page: number, passage: string, mode: ExplainMode, question?: string) {
   if (!book) return;
+  setPanelTab("explanations");
   const current = book;
   const context = passage ? await surrounding(page, passage) : (await view.text(page)).slice(0, PAGE_CONTEXT_CHARS);
   if (book !== current) return;
@@ -899,7 +1014,10 @@ document.addEventListener("mouseup", (e) => {
       // A new selection starts with an empty question.
       if (sel.text !== pendingSelection?.text) questionInput.value = "";
       pendingSelection = { text: sel.text, page: sel.page };
-      markPending(window.getSelection()!.getRangeAt(0).cloneRange());
+      pendingRange = window.getSelection()!.getRangeAt(0).cloneRange();
+      markPending(pendingRange);
+      // Over an existing highlight, the button takes it away instead.
+      highlightLabel.textContent = bookNotes.highlightAt(sel.page, pendingRange) ? "Remove highlight" : "Highlight";
       showMenu(sel.rect, sel.upward);
     }
     else hideMenu();
@@ -928,6 +1046,12 @@ document.addEventListener("keydown", (e) => {
     const key = e.key.toLowerCase();
     if (key === "e") explainSelection("text");
     else if (key === "v") explainSelection("visual");
+    else if (key === "h") markSelection(false);
+    else if (key === "n" && pendingSelection) {
+      // The note box takes focus; don't let the N land in it.
+      e.preventDefault();
+      markSelection(true);
+    }
   }
 });
 

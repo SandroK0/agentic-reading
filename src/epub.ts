@@ -1,4 +1,5 @@
 import { unzipSync } from "fflate";
+import { textIndex } from "./text-index";
 import type { ContentsNode } from "./toc";
 
 /**
@@ -574,6 +575,24 @@ export class EpubView {
     };
   }
 
+  /** Whether a position is on screen now: on the spread you're looking at, or in view when scrolling (for bookmarks). */
+  showsPosition(position: EpubPosition): boolean {
+    const n = Math.floor(position);
+    const sheet = this.sheets[n - 1];
+    if (!sheet) return false;
+    if (this.paged) return n === this.current && Math.min(this.spreads - 1, Math.floor((position - n) * this.spreads + 1e-6)) === this.spread;
+    const y = this.top(sheet) + (position - n) * sheet.offsetHeight;
+    return y >= this.viewer.scrollTop - 1 && y < this.viewer.scrollTop + this.viewer.clientHeight;
+  }
+
+  /** How far through the whole book a position is, 0 to 1 (for marks on the progress bar). */
+  fractionOf(position: EpubPosition): number {
+    const { sizes } = this.weights();
+    const n = Math.floor(position);
+    const total = sum(sizes) || 1;
+    return Math.min(1, (sum(sizes.slice(0, n - 1)) + (position - n) * (sizes[n - 1] ?? 0)) / total);
+  }
+
   /** The page a position is on, once the book is counted (paginated only); null otherwise. */
   pageAt(position: EpubPosition): number | null {
     if (!this.paged || !this.pageCounts) return null;
@@ -735,34 +754,6 @@ function findText(root: Element, passage: string): Range | null {
   return at < 0 ? null : index.range(at, at + 1);
 }
 
-/**
- * The text under `root` with every run of whitespace as one space, and a way
- * back from a stretch of it to a Range in the document. Finding passages and
- * searching the book both match against this.
- */
-export function textIndex(root: Element): { flat: string; range: (start: number, end: number) => Range } {
-  let flat = "";
-  const owners: { node: Node; offset: number }[] = [];
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const text = node.textContent ?? "";
-    for (let i = 0; i < text.length; i++) {
-      const c = /\s/.test(text[i]) ? " " : text[i];
-      if (c === " " && flat.endsWith(" ")) continue;
-      flat += c;
-      owners.push({ node, offset: i });
-    }
-  }
-  return {
-    flat,
-    range(start, end) {
-      const range = document.createRange();
-      range.setStart(owners[start].node, owners[start].offset);
-      range.setEnd(owners[end - 1].node, owners[end - 1].offset + 1);
-      return range;
-    },
-  };
-}
 
 function text(files: Record<string, Uint8Array>, filePath: string): string {
   const file = files[filePath];

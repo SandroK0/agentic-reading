@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { BookInfo, BookState, Explanation, GeneratedContents, LibraryBook, Settings } from "../shared/types";
+import type { Annotations, BookInfo, BookState, Explanation, GeneratedContents, LibraryBook, Settings } from "../shared/types";
 
 /** Small JSON store in the app's userData folder: recents, pages, explainers. */
 
@@ -83,6 +83,11 @@ export class Store {
   deleteExplanation(bookPath: string, id: string) {
     const book = this.book(bookPath);
     book.explanations = book.explanations.filter((e) => e.id !== id);
+    this.save();
+  }
+
+  saveAnnotations(bookPath: string, annotations: Annotations) {
+    this.book(bookPath).annotations = annotations;
     this.save();
   }
 

@@ -1,4 +1,5 @@
-import { textIndex, type EpubView } from "./epub";
+import type { EpubView } from "./epub";
+import { textIndex } from "./text-index";
 import { closeWhenDismissed } from "./popover";
 import { partsOf } from "./dom";
 

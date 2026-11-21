@@ -29,6 +29,9 @@
     </div>
 
     <div class="tb-group">
+      <button class="icon-btn" id="bookmark-btn" title="Bookmark this page (⌘D)" aria-label="Bookmark this page" aria-pressed="false" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z" /></svg>
+      </button>
       <div class="popover-anchor" id="search-anchor" hidden>
         <button class="icon-btn" id="search-btn" title="Search in book (⌘F)" aria-label="Search in book" aria-haspopup="dialog" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.5-4.5" /></svg>
@@ -170,6 +173,16 @@
                    placeholder="Ask about this passage (optional)" aria-label="Question about the selected text"
                    title="Leave empty for a general explanation. Enter explains, Esc closes.">
           </label>
+          <div class="selection-mark">
+            <button id="highlight-text" title="Highlight the passage (H)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 15l-4 4h6l1.5-1.5" /><path d="M14.5 4.5l5 5-7.5 7.5-5-5z" /></svg>
+              <span id="highlight-label">Highlight</span> <kbd>H</kbd>
+            </button>
+            <button id="note-text" title="Highlight the passage and write a note on it (N)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v11l-5 5H5z" /><path d="M14 20v-5h5" /></svg>
+              Note <kbd>N</kbd>
+            </button>
+          </div>
           <div class="selection-menu-actions">
             <button id="explain-text" class="primary" title="Short written explanation (E)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" /></svg>
@@ -184,6 +197,7 @@
         </div>
       </div>
 
+      <div class="bookmark-ribbon" id="bookmark-ribbon" role="img" aria-label="This page is bookmarked" hidden></div>
       <button class="page-turn prev" id="turn-prev" title="Previous page" aria-label="Previous page" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
       </button>
@@ -195,6 +209,7 @@
         <div class="scrubber" id="scrubber" role="slider" tabindex="0" aria-label="Position in the book" aria-valuemin="0" aria-valuemax="100">
           <div class="scrubber-track"><div class="scrubber-fill" id="scrubber-fill"></div></div>
           <div class="scrubber-ticks" id="scrubber-ticks" aria-hidden="true"></div>
+          <div class="scrubber-marks" id="scrubber-marks" aria-hidden="true"></div>
           <div class="scrubber-thumb" id="scrubber-thumb" aria-hidden="true"></div>
           <div class="scrubber-tip" id="scrubber-tip" role="tooltip" hidden></div>
         </div>
@@ -235,7 +250,7 @@
     <aside class="panel" id="panel">
       <div class="panel-top">
         <div class="panel-head">
-          <span class="panel-title">Explanations</span>
+          <span class="panel-title" id="panel-title">Explanations</span>
           <button class="icon-btn" id="panel-collapse-all" title="Minimise or expand all" aria-label="Minimise or expand all explanations">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l5 4 5-4M7 19l5-4 5 4" /></svg>
           </button>
@@ -246,13 +261,25 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>
           </button>
         </div>
-        <div class="segmented" role="tablist" aria-label="Which explanations">
+        <div class="segmented panel-tabs" role="tablist" aria-label="Explanations or notes">
+          <button role="tab" id="tab-explanations" aria-selected="true">Explanations</button>
+          <button role="tab" id="tab-notes" aria-selected="false">Notes <span class="seg-count" id="count-notes"></span></button>
+        </div>
+        <div class="segmented" id="scope-tabs" role="tablist" aria-label="Which explanations">
           <button role="tab" id="scope-page" aria-selected="true">This page <span class="seg-count" id="count-page"></span></button>
           <button role="tab" id="scope-all" aria-selected="false">All <span class="seg-count" id="count"></span></button>
         </div>
       </div>
       <div class="cards" id="cards">
         <p class="muted hint" id="cards-empty">Select a passage in the book and choose Explain. Your explanations collect here.</p>
+      </div>
+      <div class="notes-view" id="notes-view" hidden>
+        <div class="notes-filters" id="notes-filters" role="group" aria-label="Show"></div>
+        <div class="notes-list" id="notes-list"></div>
+        <div class="notes-foot">
+          <span>Saved with the book</span>
+          <button id="notes-export">Export as Markdown</button>
+        </div>
       </div>
     </aside>
   </main>

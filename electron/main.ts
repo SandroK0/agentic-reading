@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from 
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { BookInfo, ContentsSource, ExplainEvent, ExplainRequest, Explanation, Settings } from "../shared/types";
+import type { Annotations, BookInfo, ContentsSource, ExplainEvent, ExplainRequest, Explanation, Settings } from "../shared/types";
 import { ContentsGenerator } from "./contents";
 import { Explainer } from "./explainer";
 import { createProviders } from "./llm";
@@ -220,6 +220,17 @@ function registerIpc() {
   ipcMain.handle("explanation:delete", (_e, bookPath: string, id: string) => {
     widgets.delete(id);
     store.deleteExplanation(assertBook(bookPath), id);
+  });
+  ipcMain.handle("annotations:save", (_e, bookPath: string, annotations: Annotations) => store.saveAnnotations(assertBook(bookPath), annotations));
+  ipcMain.handle("notes:export", async (_e, suggestedName: string, markdown: string) => {
+    const result = await dialog.showSaveDialog(win!, {
+      title: "Export notes",
+      defaultPath: path.join(app.getPath("documents"), suggestedName.replace(/[\\/:*?"<>|]+/g, " ").trim() || "Notes.md"),
+      filters: [{ name: "Markdown", extensions: ["md"] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    await fs.promises.writeFile(result.filePath, String(markdown), "utf8");
+    return result.filePath;
   });
   ipcMain.handle("settings:get", () => store.settings());
   ipcMain.handle("settings:save", (_e, settings: Settings) => store.saveSettings(settings));

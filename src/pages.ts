@@ -39,6 +39,8 @@ export class Pages {
   private scrollQueued = false;
   private redrawTimer: ReturnType<typeof setTimeout> | undefined;
   current = 1;
+  /** Called each time a page's text layer is drawn (pages are redrawn as you scroll and zoom), so highlights can go on it. */
+  onTextLayer: (page: number, layer: HTMLElement) => void = () => {};
 
   constructor(
     private viewer: HTMLElement,
@@ -245,6 +247,7 @@ export class Pages {
       // Swap in one go, so re-drawing after a zoom never flashes a blank page.
       slot.el.replaceChildren(canvas, textLayer);
       slot.drawnScale = scale;
+      this.onTextLayer(slot.n, textLayer);
     } catch (err) {
       if (token !== slot.token || (err instanceof Error && err.name === "RenderingCancelledException")) return;
       console.error(`Couldn't draw page ${slot.n}`, err);

@@ -77,6 +77,15 @@ export class Contents {
   }
 
   /** Highlights the last section that starts at or before `page`. */
+  /** The title of the contents entry a page falls under, if the book has contents (for grouping notes by chapter). */
+  chapterAt(page: number): string | null {
+    let best: Entry | null = null;
+    for (const entry of this.entries) {
+      if (entry.page !== null && entry.page <= page && (!best || entry.page >= best.page!)) best = entry;
+    }
+    return best?.link.title || best?.link.textContent?.trim() || null;
+  }
+
   setPage(page: number) {
     this.currentPage = page;
     let best: Entry | null = null;

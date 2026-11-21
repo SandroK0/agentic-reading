@@ -82,6 +82,37 @@ export interface FollowUp {
   createdAt: number;
 }
 
+/**
+ * A highlighted passage, and the note on it if there is one. It's found again
+ * by where it sits in its page's text, so it lands on the same words even
+ * when the same phrase appears twice on the page.
+ */
+export interface Highlight {
+  id: string;
+  /** The PDF page or EPUB section it's on. */
+  page: number;
+  /** Where it starts and ends in that page's text, counting each run of whitespace as one space. */
+  start: number;
+  end: number;
+  /** The highlighted words, to check against (and to find them by, if the page's text ever changes). */
+  text: string;
+  note?: string;
+  createdAt: number;
+}
+
+/** A bookmarked place: a PDF page, or an EPUB position (section number plus how far through it). */
+export interface Bookmark {
+  id: string;
+  position: number;
+  createdAt: number;
+}
+
+/** What you've marked up in a book. */
+export interface Annotations {
+  highlights: Highlight[];
+  bookmarks: Bookmark[];
+}
+
 export interface BookState {
   page: number;
   /** What the library shows for the book, saved when it's opened. */
@@ -91,6 +122,8 @@ export interface BookState {
   explanations: Explanation[];
   /** A table of contents written by the model, for PDFs that don't have one. */
   generatedContents?: GeneratedContents;
+  /** Highlights, notes and bookmarks. Missing until the first one is made. */
+  annotations?: Annotations;
 }
 
 export interface BookInfo {
@@ -151,6 +184,10 @@ export interface ReaderApi {
   savePage(path: string, page: number): Promise<void>;
   saveExplanation(path: string, explanation: Explanation): Promise<void>;
   deleteExplanation(path: string, id: string): Promise<void>;
+  /** Replaces a book's highlights, notes and bookmarks. */
+  saveAnnotations(path: string, annotations: Annotations): Promise<void>;
+  /** Asks where to save, then writes the Markdown there. Resolves to the file's path, or null if cancelled. */
+  exportNotes(suggestedName: string, markdown: string): Promise<string | null>;
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<void>;
   providers(): Promise<ProviderInfo[]>;

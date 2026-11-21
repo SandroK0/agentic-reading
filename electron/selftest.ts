@@ -15,6 +15,7 @@ import path from "node:path";
  * VR_SELFTEST_SCREENSHOTS=<dir> stages two explanations and saves README screenshots there
  * (use with VR_SELFTEST_PROFILE=<name> for an empty profile).
  * VR_SELFTEST_GENERATE_TOC=1 generates contents for a PDF without an outline (or loads saved ones).
+ * VR_SELFTEST_NOTES_ONLY=1 checks only highlights, notes and bookmarks (works for PDFs and EPUBs).
  * An .epub runs its own shorter check (see epubSelfTest).
  */
 export async function runSelfTest(win: BrowserWindow, open: (p: string) => void, quit: (code: number) => void) {
@@ -53,6 +54,8 @@ export async function runSelfTest(win: BrowserWindow, open: (p: string) => void,
     await shot("0b-library-after");
     await js(`document.querySelector("#empty .continue button.primary").click()`);
     if (!(await waitFor(`document.getElementById("page-total").textContent !== "/ –" && !document.getElementById("pages").hidden`, 30_000))) throw new Error("book never reopened");
+    // VR_SELFTEST_NOTES_ONLY=1 checks only highlights, notes and bookmarks, in any book (it's how PDFs get them checked).
+    if (process.env.VR_SELFTEST_NOTES_ONLY) return quit((await notesTest(js, waitFor, (ms) => new Promise((r) => setTimeout(r, ms)), shot)) ? 0 : 1);
     if (/\.epub$/i.test(pdf)) return quit((await epubSelfTest(js, waitFor, shot, win)) ? 0 : 1);
 
     // README screenshots: two real explanations on the page, then the app in a few themes, saved to VR_SELFTEST_SCREENSHOTS.
@@ -676,7 +679,13 @@ async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promi
   if (!selected || !menu) return false;
 
   // The paginated checks change layout, which clears the selection, so they run after Explain (or instead of it).
-  if (process.env.VR_SELFTEST_NO_EXPLAIN) return (await epubPagedTest(js, pause, shot, pickLayout)) && (await epubReadingToolsTest(js, waitFor, pause, shot, pickLayout, win)) && dropdownOk && jumpOk && zoomOk && opened.sections > 0 && opened.brokenImages === 0;
+  // Each group runs whatever an earlier one found, so one failure doesn't hide the rest.
+  const groups = async () => [
+    await epubPagedTest(js, pause, shot, pickLayout),
+    await epubReadingToolsTest(js, waitFor, pause, shot, pickLayout, win),
+    await notesTest(js, waitFor, pause, shot),
+  ].every(Boolean);
+  if (process.env.VR_SELFTEST_NO_EXPLAIN) return (await groups()) && dropdownOk && jumpOk && zoomOk && opened.sections > 0 && opened.brokenImages === 0;
 
   await js(`document.getElementById("explain-text").click()`);
   const done = await waitFor(`!!document.querySelector(".card .followup:not([hidden])") || !!document.querySelector(".card .status.error")`, 180_000);
@@ -727,7 +736,7 @@ async function epubSelfTest(js: Js, waitFor: (code: string, ms: number) => Promi
   await pickLayout("Scroll");
   const pagedJumpOk = pagedBack.page === selected.section && pagedBack.passageShown;
   console.log(`[selftest] epub paginated card jump ok=${pagedJumpOk}`, JSON.stringify(pagedBack));
-  const pagedOk = (await epubPagedTest(js, pause, shot, pickLayout)) && (await epubReadingToolsTest(js, waitFor, pause, shot, pickLayout, win));
+  const pagedOk = await groups();
   return done && !card.error && back.page === selected.section && back.visible && jumpOk && zoomOk && pagedOk && dropdownOk && pagedJumpOk;
 }
 
@@ -1054,7 +1063,10 @@ async function epubReadingToolsTest(
   results.slide = slidesIn && slidesOut && goneAfter;
   console.log(`[selftest] epub explanations panel slides ok=${results.slide}`, JSON.stringify({ slidesIn, slidesOut, goneAfter }));
 
-  // Full screen tucks the explanations panel away, and brings it back after.
+  // Full screen tucks the explanations panel away, and brings it back after. macOS won't take a window in the
+  // background full screen, and the pointer can sit over it when you're using the Mac, so these two checks
+  // (and the toolbar resting over the panel, which follows) only count when the test window is in front.
+  const inFront = win.isFocused();
   await js(`document.getElementById("panel-btn").click()`);
   await pause(400);
   const panelShown = () => js<boolean>(`!document.getElementById("panel").hidden`);
@@ -1067,7 +1079,7 @@ async function epubReadingToolsTest(
   await waitFor(`!document.documentElement.classList.contains("fullscreen")`, 5_000);
   await pause(800);
   const afterFull = await panelShown();
-  results.fullScreen = beforeFull && !inFull && afterFull;
+  if (inFront) results.fullScreen = beforeFull && !inFull && afterFull;
 
   // With the panel docked, the resting toolbar continues the panel to the top of the window.
   await js(`document.activeElement?.blur(); document.dispatchEvent(new MouseEvent("mousemove", { clientY: 10, bubbles: true }))`);
@@ -1080,8 +1092,110 @@ async function epubReadingToolsTest(
   })()`);
   await shot("epub-14-rest-with-panel");
   // Nothing is laid over the toolbar's buttons: the strip is part of its background.
-  results.restWithPanel = restedWithPanel && Math.abs(strip.strip - strip.panel) < 2 && /linear-gradient/.test(strip.layers) && (strip.pseudo === "none" || strip.pseudo === "normal");
-  console.log(`[selftest] epub resting toolbar continues the panel ok=${results.restWithPanel}`, JSON.stringify(strip));
-  console.log(`[selftest] epub full screen hides the panel ok=${results.fullScreen}`, JSON.stringify({ beforeFull, inFull, afterFull }));
+  if (inFront) results.restWithPanel = restedWithPanel && Math.abs(strip.strip - strip.panel) < 2 && /linear-gradient/.test(strip.layers) && (strip.pseudo === "none" || strip.pseudo === "normal");
+  console.log(`[selftest] epub resting toolbar continues the panel ${inFront ? `ok=${results.restWithPanel}` : "skipped (window in background)"}`, JSON.stringify(strip));
+  console.log(`[selftest] epub full screen hides the panel ${inFront ? `ok=${results.fullScreen}` : "skipped (window in background)"}`, JSON.stringify({ beforeFull, inFull, afterFull }));
+  return Object.values(results).every(Boolean);
+}
+
+/**
+ * Highlights, notes and bookmarks, in whichever book is open (EPUB or PDF):
+ * H highlights a selection, N adds a note, selecting a highlight offers to
+ * remove it, ⌘D bookmarks the page, and all of it comes back after the book
+ * is closed and opened again.
+ */
+async function notesTest(js: Js, waitFor: (code: string, ms: number) => Promise<boolean>, pause: (ms: number) => Promise<unknown>, shot: (name: string) => Promise<void>) {
+  const results: Record<string, boolean> = {};
+  const marks = `({
+    plain: CSS.highlights.get("user-highlight")?.size ?? 0,
+    noted: CSS.highlights.get("user-note")?.size ?? 0,
+    items: document.querySelectorAll("#notes-list .note-item").length,
+    count: document.getElementById("count-notes").textContent,
+  })`;
+  type Marks = { plain: number; noted: number; items: number; count: string };
+  // Selects `chars` characters, starting `skip` in, of the nth visible run of 50+ characters, and opens the selection menu.
+  const select = (nth: number, skip = 0, chars = 40) => js<string | null>(`(() => {
+    const roots = [...document.querySelectorAll(".epub-section.current, .page .textLayer")];
+    const box = document.getElementById("viewer").getBoundingClientRect();
+    const texts = roots.flatMap((root) => {
+      const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), out = [];
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        if (n.data.trim().length < 50) continue;
+        const r = document.createRange(); r.selectNodeContents(n); const rect = r.getBoundingClientRect();
+        if (rect.top >= box.top && rect.bottom <= box.bottom && rect.left >= box.left && rect.right <= box.right) out.push(n);
+      }
+      return out;
+    });
+    const node = texts[${nth}];
+    if (!node) return null;
+    const start = node.data.search(/\\S/) + ${skip};
+    const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + ${chars});
+    getSelection().removeAllRanges(); getSelection().addRange(range);
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    return range.toString();
+  })()`);
+  const key = (k: string, meta = false) => js(`document.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(k)}, metaKey: ${meta}, bubbles: true, cancelable: true }))`);
+
+  await js(`document.getElementById("panel").hidden && document.getElementById("panel-btn").click()`);
+  await js(`document.getElementById("tab-notes").click()`);
+  await pause(300);
+  const before = await js<Marks>(marks);
+
+  // H highlights the selection.
+  const first = await select(0);
+  await pause(200);
+  await key("h");
+  await pause(300);
+  const highlighted = await js<Marks>(marks);
+  results.highlight = !!first && highlighted.plain === before.plain + 1 && highlighted.items === before.items + 1;
+  console.log(`[selftest] notes: H highlights ok=${results.highlight}`, JSON.stringify({ first, before, highlighted }));
+
+  // N highlights another passage and opens its note; what you type is kept, and the passage is underlined as noted.
+  const second = await select(1);
+  await pause(200);
+  await key("n");
+  await pause(300);
+  const editor = await js<boolean>(`document.activeElement?.classList.contains("note-editor") ?? false`);
+  await js(`(() => { const box = document.activeElement; box.value = "Remember this one."; box.dispatchEvent(new Event("input")); })()`);
+  await pause(700);
+  await js(`document.activeElement?.blur()`);
+  await js(`document.getElementById("tab-explanations").click(); document.getElementById("tab-notes").click()`);
+  await pause(200);
+  const noted = await js<Marks & { note: string | null }>(`({ ...${marks}, note: document.querySelector("#notes-list .note-text")?.textContent ?? document.querySelector("#notes-list .note-editor")?.value ?? null })`);
+  await shot("notes-1-highlights");
+  results.note = !!second && editor && noted.noted === 1 && noted.note === "Remember this one.";
+  console.log(`[selftest] notes: N adds a note ok=${results.note}`, JSON.stringify({ second, editor, noted }));
+
+  // Selecting inside the first highlight offers to take it away.
+  await select(0, 5, 10);
+  await pause(200);
+  const offer = await js<string>(`document.getElementById("highlight-label").textContent`);
+  await js(`document.getElementById("highlight-text").click()`);
+  await pause(300);
+  const removed = await js<Marks>(marks);
+  results.remove = offer === "Remove highlight" && removed.plain === highlighted.plain - 1;
+  console.log(`[selftest] notes: remove a highlight ok=${results.remove}`, JSON.stringify({ offer, removed }));
+
+  // ⌘D bookmarks the page: the button fills, the ribbon shows, it's listed; again takes it away.
+  await key("d", true);
+  await pause(300);
+  const bookmarked = await js<{ pressed: string | null; ribbon: boolean; listed: number }>(`({ pressed: document.getElementById("bookmark-btn").getAttribute("aria-pressed"), ribbon: !document.getElementById("bookmark-ribbon").hidden, listed: document.querySelectorAll("#notes-list .note-item.bookmark").length })`);
+  await shot("notes-2-bookmark");
+  results.bookmark = bookmarked.pressed === "true" && bookmarked.ribbon && bookmarked.listed === 1;
+  console.log(`[selftest] notes: ⌘D bookmarks ok=${results.bookmark}`, JSON.stringify(bookmarked));
+
+  // Closed and opened again, the note and the bookmark come back.
+  await js(`document.getElementById("home-btn").click()`);
+  await waitFor(`!document.getElementById("empty").hidden && !!document.querySelector("#empty .continue button.primary")`, 10_000);
+  await js(`document.querySelector("#empty .continue button.primary").click()`);
+  await waitFor(`!document.getElementById("pages").hidden && document.getElementById("count-notes").textContent !== ""`, 20_000);
+  await pause(1500);
+  const reopened = await js<Marks & { bookmarks: number; pressed: string | null }>(`({ ...${marks}, bookmarks: document.querySelectorAll("#notes-list .note-item.bookmark").length, pressed: document.getElementById("bookmark-btn").getAttribute("aria-pressed") })`);
+  results.saved = reopened.noted === 1 && reopened.bookmarks === 1 && reopened.pressed === "true";
+  console.log(`[selftest] notes: saved with the book ok=${results.saved}`, JSON.stringify(reopened));
+
+  // Tidy up, so the next run starts clean: remove every mark from the list.
+  await js(`(() => { let b; while ((b = document.querySelector("#notes-list .note-actions .danger, #notes-list .note-remove"))) b.click(); })()`);
+  await js(`document.getElementById("tab-explanations").click()`);
   return Object.values(results).every(Boolean);
 }
